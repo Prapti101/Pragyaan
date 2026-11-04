@@ -1,0 +1,38 @@
+# Environment Variables & Secrets (CRITICAL)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Python & Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Streamlit (config.toml holds the PRAGYAAN theme and is committed; secrets are not)
+.streamlit/secrets.toml
+
+# Datasets
+data/raw/*.csv
+data/processed/*.parquet
+data/copilot.db
+data/documents/
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project Management & Internal Planning Docs
+PRD.md
+prd.md
+TODO_AND_DONE.md
+todo_and_done.md

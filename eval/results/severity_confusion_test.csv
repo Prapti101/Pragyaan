@@ -1,0 +1,10 @@
+true_label,predicted_label,count
+high,high,230
+high,low,53
+high,medium,174
+low,high,26
+low,low,124
+low,medium,90
+medium,high,104
+medium,low,67
+medium,medium,324

@@ -1,0 +1,74 @@
+[server]
+# Serves app/static/ (bundled fonts and logo) so the theme works offline.
+enableStaticServing = true
+maxUploadSize = 25
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#4257E0"
+backgroundColor = "#F5F6FA"
+secondaryBackgroundColor = "#ECEEF5"
+textColor = "#151A31"
+borderColor = "#E2E5EF"
+linkColor = "#3446C8"
+baseRadius = "10px"
+buttonRadius = "9px"
+font = "IBM Plex Sans, system-ui, sans-serif"
+headingFont = "Sora, IBM Plex Sans, system-ui, sans-serif"
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+headingFontSizes = ["2.05rem", "1.45rem", "1.15rem", "1rem", "0.95rem", "0.9rem"]
+codeFont = "IBM Plex Mono, monospace"
+codeBackgroundColor = "#ECEEF5"
+codeTextColor = "#151A31"
+baseFontSize = 15
+dataframeHeaderBackgroundColor = "#F2F3F8"
+chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-700-normal.woff2"
+weight = 700
+
+[[theme.fontFaces]]
+family = "Sora"
+url = "app/static/fonts/sora-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Sora"
+url = "app/static/fonts/sora-latin-700-normal.woff2"
+weight = 700
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-400-normal.woff2"
+weight = 400
+
+[theme.sidebar]
+backgroundColor = "#121A3A"
+secondaryBackgroundColor = "#1C2650"
+textColor = "#C9CEE6"
+borderColor = "#26315C"
+primaryColor = "#F0A23B"
+linkColor = "#F0A23B"
