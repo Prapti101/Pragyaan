@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import re
 import secrets
 import string
@@ -146,30 +145,6 @@ def require_role(actor: dict | None, *roles: str) -> dict:
     if not acct or not acct["is_active"] or acct["role"] not in roles:
         raise PermissionDenied("You don't have permission to do this.")
     return acct
-
-
-def bootstrap_accounts_from_env() -> list[str]:
-    """Create the accounts named in the hosting secrets, for deployments without a shell (e.g. Streamlit Community
-    Cloud, whose file system starts empty after every restart).
-
-    Reads PRAGYAAN_ANALYST_ID / PRAGYAAN_ANALYST_PASSWORD / PRAGYAAN_ANALYST_NAME and the same three for
-    PRAGYAAN_EMPLOYEE_*. An ID that already exists is left untouched. As everywhere else, only the salted hash of the
-    password is stored in the database."""
-    created = []
-    for role, prefix in (("analyst", "PRAGYAAN_ANALYST"), ("employee", "PRAGYAAN_EMPLOYEE")):
-        login_id = os.getenv(f"{prefix}_ID", "").strip()
-        password = os.getenv(f"{prefix}_PASSWORD", "")
-        if not login_id or not password:
-            continue
-        if fetchone("SELECT id FROM accounts WHERE login_id = ?", (normalize_id(login_id),)):
-            continue
-        name = os.getenv(f"{prefix}_NAME", "").strip() or ROLE_LABELS[role]
-        try:
-            create_account(login_id, name, role, password)
-            created.append(normalize_id(login_id))
-        except AuthError:
-            pass  # an invalid ID or weak password in the secrets: leave it to first-run setup
-    return created
 
 
 def create_account(login_id: str, name: str, role: str, password: str, *, department: str | None = None,

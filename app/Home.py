@@ -44,7 +44,7 @@ _refresh_backend_modules()
 import auth_ui  # noqa: E402
 import ui  # noqa: E402
 from copilot.activity import list_notifications, log_activity, mark_all_read, unread_count  # noqa: E402
-from copilot.auth import bootstrap_accounts_from_env, needs_setup, revoke_session, session_account  # noqa: E402
+from copilot.auth import needs_setup, revoke_session, session_account  # noqa: E402
 from copilot.automation import seed_default_rules  # noqa: E402
 from copilot.db import ensure_db  # noqa: E402
 
@@ -56,15 +56,6 @@ st.set_page_config(
 )
 ensure_db()
 seed_default_rules()
-
-
-@st.cache_resource(show_spinner=False)
-def _bootstrap_accounts() -> list[str]:
-    """Hosted deployments: create the accounts named in the app's secrets, once per server process."""
-    return bootstrap_accounts_from_env()
-
-
-_bootstrap_accounts()
 
 
 # ---------------------------------------------------------------- session
