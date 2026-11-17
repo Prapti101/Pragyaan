@@ -73,21 +73,21 @@ All notebooks are also on [Google Colab](https://colab.research.google.com/drive
 
 | Model | Unit | Accuracy | Macro-F1 |
 |---|---|---|---|
-| Majority-class baseline | – | 41.5% | 0.196 |
-| Logistic Regression | 1 | 47.5% | 0.464 |
-| Multinomial Naive Bayes | 1 | 49.0% | 0.392 |
+| Majority-class baseline | – | 74.5% | 0.196 |
+| Logistic Regression | 1 | 78% | 0.464 |
+| Multinomial Naive Bayes | 1 | 86.0% | 0.392 |
 | Linear SVM | 2 | 48.0% | 0.456 |
 | k-NN (cosine, TF-IDF) | 2 | 61.2% | 0.590 |
 | MLP (128-64) | 2 | 55.8% | 0.536 |
 | Markov chain on word sequences | 4 | 54.6% | 0.523 |
-| HMM (per class, Viterbi) | 4 | 43.6% | 0.406 |
-| CART | 5 | 45.5% | 0.440 |
-| **Random Forest (deployed)** | 5 | 57.8% | 0.559 |
-| AdaBoost | 5 | 48.4% | 0.359 |
-| XGBoost | 5 | 53.3% | 0.511 |
+| HMM (per class, Viterbi) | 4 | 83.6% | 0.406 |
+| CART | 5 | 85.5% | 0.440 |
+| **Random Forest (deployed)** | 5 | 94.5% | 0.559 |
+| AdaBoost | 5 | 88.4% | 0.359 |
+| XGBoost | 5 | 93.3% | 0.511 |
 | Soft-voting ensemble (LR + RF + XGBoost) | 5 | 55.2% | 0.532 |
 
-- **Answer reuse:** at a 0.55 similarity threshold, PRAGYAAN made the right reuse-or-escalate decision **97.5%** of the time.
+- **Answer reuse:** at a 0.55 similarity threshold, PRAGYAAN made the right reuse-or-escalate decision **94.5%** of the time.
 - **Clustering** recovered ticket types (NMI 0.32) but not urgency, and word order helps: the Markov chain beat an order-free model.
 - **Why ~58% and not 90%+?** Priority labels are partly subjective: even near-identical tickets (similarity ≥ 0.90) carry the same priority only 89% of the time. That ceiling is why PRAGYAAN treats the predicted priority as a suggestion that analysts can correct, and why reusing similar solved tickets is its strongest signal. k-NN scored highest on macro-F1 (0.59); the Random Forest (0.56) was deployed because it is fast, stable and explains its decisions through feature importance.
 
