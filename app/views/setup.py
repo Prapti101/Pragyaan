@@ -39,7 +39,9 @@ with mid:
         if st.context.ip_address is not None:
             auth_ui.message("error", "For security, first-run setup only works on the computer running PRAGYAAN. "
                             "Open it there, or run <code>python scripts/create_account.py create --role analyst "
-                            "--id SA-001 --name \"Your Name\"</code> on the server.", raw_html=True)
+                            "--id SA-001 --name \"Your Name\"</code> on the server. On a hosted deployment, add "
+                            "<code>PRAGYAAN_ANALYST_ID</code> and <code>PRAGYAAN_ANALYST_PASSWORD</code> to the "
+                            "app's secrets and restart it.", raw_html=True)
             st.stop()
         with st.form("setup", border=False):
             name = st.text_input("Full name", icon=":material/person:", autocomplete="name")
