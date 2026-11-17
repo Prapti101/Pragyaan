@@ -91,8 +91,6 @@ All notebooks are also on [Google Colab](https://colab.research.google.com/drive
 - **Clustering** recovered ticket types (NMI 0.32) but not urgency, and word order helps: the Markov chain beat an order-free model.
 - **Why ~58% and not 90%+?** Priority labels are partly subjective: even near-identical tickets (similarity ≥ 0.90) carry the same priority only 89% of the time. That ceiling is why PRAGYAAN treats the predicted priority as a suggestion that analysts can correct, and why reusing similar solved tickets is its strongest signal. k-NN scored highest on macro-F1 (0.59); the Random Forest (0.56) was deployed because it is fast, stable and explains its decisions through feature importance.
 
-The full write-up is in [`report/PRAGYAAN_ML_Project_Report.pdf`](report/PRAGYAAN_ML_Project_Report.pdf).
-
 ## Run it (Windows)
 
 Double-click **`run_project.bat`** in this folder. It installs anything missing, starts the app and opens **http://localhost:8501**. Or by hand from this folder:
@@ -144,7 +142,6 @@ Pragyaan/
 ├── models/                # trained Random Forest (priority) and intent models
 ├── notebooks/             # Unit 1–5 notebooks and their data
 ├── eval/results/          # benchmarks, threshold sweep, confusion matrices
-├── report/                # final project report (PDF)
 ├── scripts/               # data preparation, training, evaluation, account tools
 ├── docs/screenshots/      # images used in this README
 └── tests/                 # automated tests
