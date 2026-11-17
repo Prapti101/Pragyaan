@@ -69,7 +69,18 @@ A Logistic Regression model labels the ticket type (incident, request, problem, 
 
 All notebooks are also on [Google Colab](https://colab.research.google.com/drive/15HuHDw7ECVTomOBJ-nf5GZK-hi4uXIW6?usp=sharing).
 
-### Results (priority prediction, 1,907 unseen test tickets)
+### Key results
+
+| What we measured | Result |
+|---|---|
+| Correct answer-or-escalate decisions (similarity threshold 0.55, 40 test questions) | **97.5%** |
+| Repeated questions answered straight from a solved ticket | **100%** |
+| Answers grounded in a real solved ticket (audit of 20 answers) | **20 / 20** |
+| Right ticket type among the top 5 retrieved tickets (Hit@5, 300 queries) | **95.3%** |
+| Ticket-type classifier (Logistic Regression), macro-F1 | **0.81** |
+| Priority model vs. always guessing the most common priority (macro-F1) | **0.56 vs 0.20, nearly 3×** |
+
+### Priority prediction (1,907 unseen test tickets)
 
 | Model | Unit | Accuracy | Macro-F1 |
 |---|---|---|---|
@@ -87,9 +98,8 @@ All notebooks are also on [Google Colab](https://colab.research.google.com/drive
 | XGBoost | 5 | 53.3% | 0.511 |
 | Soft-voting ensemble (LR + RF + XGBoost) | 5 | 55.2% | 0.532 |
 
-- **Answer reuse:** at a 0.55 similarity threshold, PRAGYAAN made the right reuse-or-escalate decision **97.5%** of the time.
 - **Clustering** recovered ticket types (NMI 0.32) but not urgency, and word order helps: the Markov chain beat an order-free model.
-- **Why ~58% and not 90%+?** Priority labels are partly subjective: even near-identical tickets (similarity ≥ 0.90) carry the same priority only 89% of the time. That ceiling is why PRAGYAAN treats the predicted priority as a suggestion that analysts can correct, and why reusing similar solved tickets is its strongest signal. k-NN scored highest on macro-F1 (0.59); the Random Forest (0.56) was deployed because it is fast, stable and explains its decisions through feature importance.
+- **Why is priority harder than the rest?** Priority labels are partly subjective: even near-identical tickets (similarity ≥ 0.90) carry the same priority only 89% of the time, which caps what any text model can reach. That is why PRAGYAAN treats the predicted priority as a suggestion that analysts can correct, and leans on reusing similar solved tickets, where it is strongest. k-NN scored highest on macro-F1 (0.59); the Random Forest (0.56) was deployed because it is fast, stable and explains its decisions through feature importance.
 
 The full write-up is in [`report/PRAGYAAN_ML_Project_Report.pdf`](report/PRAGYAAN_ML_Project_Report.pdf).
 
