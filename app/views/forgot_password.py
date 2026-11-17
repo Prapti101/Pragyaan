@@ -24,15 +24,11 @@ role = st.session_state.get("forgot_role", "employee")
 portal = auth_ui.PORTALS[role]
 back = f"{role}_login"
 
-auth_ui.theme()
-st.markdown(f"<style>.st-key-auth-card {{ --card-accent:{portal['accent']}; --pc:{portal['accent']}; "
-            f"{'--b1:#0891B2;--b2:#0D9488;--bglow:rgba(34,211,238,.75);' if role == 'employee' else ''} }}</style>",
-            unsafe_allow_html=True)
+auth_ui.theme(ambient=True, role=role)
 auth_ui.brand_bar(f"Back to {portal['label']} sign-in", back, key="fp-top-back")
 
 _, mid, _ = st.columns([1, 1.5, 1])
 with mid:
-    st.write("")
     with st.container(key="auth-card"):
         st.markdown(f'<div class="pg-form-head" style="--card-accent:{portal["accent"]}">'
                     f'<div class="ic">{auth_ui.icon("key")}</div><h1>Reset your password</h1>'

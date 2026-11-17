@@ -36,7 +36,6 @@ with k4:
     rate = f", {ss['rate_pct']:.0f}% of employee tickets" if ss["rate_pct"] is not None else ""
     ui.kpi("Self-resolved", f"{ss['total']}", f"{ss['recent']} in the last 7 days{rate}", icon_name="task_alt",
            tone=ui.STAGE_COLORS["resolved"] if ss["total"] else None)
-st.write("")
 
 people = [a for a in list_accounts(active_only=True)]
 load = {w["id"]: w for w in workload()}

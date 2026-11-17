@@ -10,55 +10,59 @@ gatherUsageStats = false
 toolbarMode = "minimal"
 
 [theme]
+# PRAGYAAN "Ink & Signal": warm ivory paper, deep ink, electric cobalt, acid lime and vivid coral.
+# Editorial type (Bricolage Grotesque headlines, Instrument Sans text), thick ink edges with hard shadows.
+# The full component styling lives in app/ui.py; these values set Streamlit's own widgets to match.
 base = "light"
-primaryColor = "#4257E0"
-backgroundColor = "#F5F6FA"
-secondaryBackgroundColor = "#ECEEF5"
-textColor = "#151A31"
-borderColor = "#E2E5EF"
-linkColor = "#3446C8"
+primaryColor = "#2340FF"
+backgroundColor = "#F4EEE1"
+secondaryBackgroundColor = "#EBE3D1"
+textColor = "#0A0C1B"
+borderColor = "#0A0C1B"
+showWidgetBorder = true
+linkColor = "#2340FF"
+linkUnderline = true
 baseRadius = "10px"
-buttonRadius = "9px"
-font = "IBM Plex Sans, system-ui, sans-serif"
-headingFont = "Sora, IBM Plex Sans, system-ui, sans-serif"
-headingFontWeights = [700, 600, 600, 600, 600, 600]
-headingFontSizes = ["2.05rem", "1.45rem", "1.15rem", "1rem", "0.95rem", "0.9rem"]
+buttonRadius = "10px"
+font = "Instrument Sans, system-ui, sans-serif"
+headingFont = "Bricolage Grotesque, Instrument Sans, system-ui, sans-serif"
+headingFontWeights = [800, 750, 700, 700, 700, 700]
+headingFontSizes = ["3rem", "2rem", "1.45rem", "1.2rem", "1.08rem", "1rem"]
 codeFont = "IBM Plex Mono, monospace"
-codeBackgroundColor = "#ECEEF5"
-codeTextColor = "#151A31"
+codeBackgroundColor = "#EBE3D1"
+codeTextColor = "#0A0C1B"
 baseFontSize = 15
-dataframeHeaderBackgroundColor = "#F2F3F8"
-chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+dataframeHeaderBackgroundColor = "#EBE3D1"
+dataframeBorderColor = "#CFC5AE"
+chartCategoricalColors = ["#2340FF", "#FF5C47", "#0A0C1B", "#8FA60F", "#7C8BFF", "#C2410C", "#5B5E70", "#B8E62E"]
+redColor = "#E8432E"
+redBackgroundColor = "#FFE1DC"
+redTextColor = "#8A1C0E"
+greenColor = "#4D7A00"
+greenBackgroundColor = "#EEFFB8"
+greenTextColor = "#2F4A00"
+blueColor = "#2340FF"
+blueBackgroundColor = "#E1E6FF"
+blueTextColor = "#1A2FC0"
+orangeColor = "#D9480F"
+orangeBackgroundColor = "#FFE5D6"
+orangeTextColor = "#8A2E06"
+violetColor = "#5B3FD9"
+violetBackgroundColor = "#E8E2FF"
+violetTextColor = "#3B248F"
+grayColor = "#5B5E70"
+grayBackgroundColor = "#E4DCCA"
+grayTextColor = "#4A4D5E"
 
 [[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/ibm-plex-sans-latin-400-normal.woff2"
-weight = 400
+family = "Bricolage Grotesque"
+url = "app/static/fonts/bricolage-grotesque-latin-var.woff2"
+weight = "200 800"
 
 [[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/ibm-plex-sans-latin-500-normal.woff2"
-weight = 500
-
-[[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/ibm-plex-sans-latin-600-normal.woff2"
-weight = 600
-
-[[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/ibm-plex-sans-latin-700-normal.woff2"
-weight = 700
-
-[[theme.fontFaces]]
-family = "Sora"
-url = "app/static/fonts/sora-latin-600-normal.woff2"
-weight = 600
-
-[[theme.fontFaces]]
-family = "Sora"
-url = "app/static/fonts/sora-latin-700-normal.woff2"
-weight = 700
+family = "Instrument Sans"
+url = "app/static/fonts/instrument-sans-latin-var.woff2"
+weight = "400 700"
 
 [[theme.fontFaces]]
 family = "IBM Plex Mono"
@@ -66,9 +70,9 @@ url = "app/static/fonts/ibm-plex-mono-latin-400-normal.woff2"
 weight = 400
 
 [theme.sidebar]
-backgroundColor = "#121A3A"
-secondaryBackgroundColor = "#1C2650"
-textColor = "#C9CEE6"
-borderColor = "#26315C"
-primaryColor = "#F0A23B"
-linkColor = "#F0A23B"
+backgroundColor = "#0A0C1B"
+secondaryBackgroundColor = "#1A1D33"
+textColor = "#F4EEE1"
+borderColor = "#3A3E5C"
+primaryColor = "#D4FF3A"
+linkColor = "#D4FF3A"

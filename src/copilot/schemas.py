@@ -24,7 +24,7 @@ class AskRequest(BaseModel):
 
 
 class AskResponse(BaseModel):
-    route: Literal["resolved", "escalated"]
+    route: Literal["resolved", "escalated", "unanswered"]
     intent: str
     answer: str | None = None
     sources: list[SourceTicket] = Field(default_factory=list)
@@ -32,6 +32,9 @@ class AskResponse(BaseModel):
     severity: SeverityInfo | None = None
     escalation_id: int | None = None
     latency_ms: int = 0
+    method: str | None = None  # the model that wrote the answer; None when a past answer is reused verbatim
+    search_text: str | None = None  # ticket-style rewording also used for the search (short questions)
+    llm_error: str | None = None  # why the language model was unavailable, when it was
 
 
 class FeedbackRequest(BaseModel):

@@ -13,7 +13,21 @@ ROOT = Path(__file__).resolve().parents[2]
 
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Groq retired the Llama 3.x models on 16 Aug 2026 (console.groq.com/docs/deprecations); an older .env that still
+# names one is moved to Groq's recommended replacement automatically.
+GROQ_RETIRED: dict[str, str] = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+    "llama3-70b-8192": "openai/gpt-oss-120b",
+    "llama3-8b-8192": "openai/gpt-oss-20b",
+    "qwen/qwen3-32b": "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b": "qwen/qwen3.8-27b",
+    "meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-oss-120b",
+    "meta-llama/llama-4-maverick-17b-128e-instruct": "openai/gpt-oss-120b",
+    "moonshotai/kimi-k2-instruct-0905": "openai/gpt-oss-120b",
+}
+_groq_model = (os.getenv("GROQ_MODEL") or "openai/gpt-oss-120b").strip()
+GROQ_MODEL: str = GROQ_RETIRED.get(_groq_model, _groq_model)
 SIM_THRESHOLD: float = float(os.getenv("SIM_THRESHOLD", "0.55"))
 CHROMA_DIR: Path = Path(os.getenv("CHROMA_DIR", str(ROOT / "data" / "chroma")))
 SQLITE_PATH: Path = Path(os.getenv("SQLITE_PATH", str(ROOT / "data" / "copilot.db")))

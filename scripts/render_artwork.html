@@ -1,0 +1,112 @@
+<!doctype html>
+<!-- Renders PRAGYAAN's 3D glass artwork (app/static/art/*.webp) with three.js.
+     Setup: in this folder run `npm install three@0.169.0`, serve it (python -m http.server 8765) and open
+     render.html?scene=ribbon&w=2400&h=1350 (scenes: ribbon, ribbon-side, knot, blob, rings), then save the canvas. -->
+<html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:transparent;overflow:hidden}</style>
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+const q = new URLSearchParams(location.search);
+const W = +q.get('w') || 1600, H = +q.get('h') || 900, sceneName = q.get('scene') || 'ribbon';
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+function gradientTexture(stops, radial) {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 1024;
+  const g = c.getContext('2d');
+  const grad = radial ? g.createRadialGradient(620, 380, 40, 512, 512, 900) : g.createLinearGradient(0, 0, 1024, 1024);
+  stops.forEach(([o, col]) => grad.addColorStop(o, col));
+  g.fillStyle = grad; g.fillRect(0, 0, 1024, 1024);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+// Environment: a dark violet studio with a white softbox and warm yellow strips (gives the citron glints)
+function studio(yellow = 0xffd84a, violet = 0x7a4dff) {
+  const env = new THREE.Scene();
+  env.background = new THREE.Color(0x1a0b4a);
+  const panel = (w, h, color, intensity, pos, rot) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(intensity), side: THREE.DoubleSide }));
+    m.position.set(...pos); m.rotation.set(...rot); env.add(m);
+  };
+  panel(16, 3, 0xffffff, 4.5, [0, 8, 1], [Math.PI / 2, 0, 0]);
+  panel(3, 14, yellow, 9.0, [-8, 0, 3], [0, Math.PI / 2, 0]);
+  panel(2.4, 12, yellow, 7.0, [8, 1, 2], [0, -Math.PI / 2, 0]);
+  panel(10, 1.6, yellow, 6.0, [0, -7, 4], [-Math.PI / 2, 0, 0]);
+  panel(14, 8, violet, 2.6, [0, 0, -9], [0, 0, 0]);
+  panel(5, 5, 0xffffff, 2.2, [5, 4, 9], [0, Math.PI, 0]);
+  panel(3, 12, yellow, 7.0, [-10, 1, 11], [0, Math.PI * 0.8, 0]);
+  panel(12, 2, yellow, 6.0, [3, -9, 11], [-Math.PI * 0.7, 0, 0]);
+  const pm = new THREE.PMREMGenerator(renderer);
+  return pm.fromScene(env, 0.035).texture;
+}
+const scene = new THREE.Scene();
+function violetBackdrop() {
+  const c = document.createElement('canvas'); c.width = 1600; c.height = 900; const g = c.getContext('2d');
+  const base = g.createRadialGradient(980, 330, 60, 800, 450, 1000);
+  base.addColorStop(0, '#8d63ff'); base.addColorStop(0.5, '#5a2ae4'); base.addColorStop(1, '#1d0868');
+  g.fillStyle = base; g.fillRect(0, 0, 1600, 900);
+  [[360, 250, 260, 'rgba(255,216,74,0.55)'], [1150, 640, 340, 'rgba(201,180,255,0.55)'], [1380, 200, 200, 'rgba(255,230,128,0.35)'], [620, 760, 300, 'rgba(160,124,255,0.5)']]
+    .forEach(([x, y, r, col]) => { const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, col); rg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = rg; g.fillRect(0, 0, 1600, 900); });
+  const vg = g.createRadialGradient(800, 450, 300, 800, 450, 1000); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(8,2,40,0.55)');
+  g.fillStyle = vg; g.fillRect(0, 0, 1600, 900);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(64, 36), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  bg.position.z = -12; scene.add(bg);
+}
+
+const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 100);
+const glass = (color, opts = {}) => new THREE.MeshPhysicalMaterial({
+  color, metalness: 0.0, roughness: 0.03, transmission: 1.0, thickness: 0.9, ior: 1.5, dispersion: 4,
+  clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.2, attenuationColor: new THREE.Color(opts.att || 0xc4b2ff),
+  attenuationDistance: opts.ad || 7, specularIntensity: 1, iridescence: opts.irid || 0.25, iridescenceIOR: 1.3, ...opts.extra });
+
+if (sceneName === 'ribbon' || sceneName === 'ribbon-side') {
+  scene.environment = studio();
+  renderer.toneMappingExposure = 1.25;
+  violetBackdrop();
+  const pts = sceneName === 'ribbon'
+    ? [[-11, 2.5, -2], [-6.5, 5.2, 0], [-2.4, 3.6, 1.2], [-3.4, -0.6, 0.2], [-1.2, -4.2, 1.4], [2.8, -3.6, 0.2], [3.6, 0.6, -0.8], [6.8, 3.4, 0.6], [10.5, 1.2, -0.6], [12, -3, -1.5]]
+    : [[-4, 7, -1], [-1.5, 4.5, 1], [-3, 1.5, 0.3], [-0.5, -0.8, 1.2], [2, 1.2, -0.4], [1.2, -3.2, 0.8], [-1.6, -5.4, 0], [1, -8, -1]];
+  const curve = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(...p)), false, 'centripetal');
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 1200, 1.05, 128, false),
+    glass(0xffffff, { att: 0xb8a2ff, ad: 9, irid: 0.35 }));
+  scene.add(tube);
+  camera.position.set(0, 0, sceneName === 'ribbon' ? 22 : 20); camera.lookAt(0, 0, 0);
+} else if (sceneName === 'knot') {
+  violetBackdrop(); renderer.toneMappingExposure = 1.25;
+  scene.environment = studio();
+  const m = new THREE.Mesh(new THREE.TorusKnotGeometry(2.3, 0.78, 420, 72, 2, 3), glass(0xffffff, { att: 0xb8a2ff, ad: 9, irid: 0.35 }));
+  m.rotation.set(0.5, 0.3, 0.2); m.position.set(1.4, -0.4, 0); scene.add(m);
+  camera.position.set(0, 0, 13); camera.lookAt(0, 0, 0);
+} else if (sceneName === 'blob') {
+  scene.background = gradientTexture([[0, '#fbe7f1'], [0.5, '#e6dcff'], [1, '#c8b6ff']], false);
+  scene.environment = studio(0xffe14a, 0xb79bff);
+  const g = new THREE.IcosahedronGeometry(2.6, 64);
+  const pos = g.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i); const n = v.clone().normalize();
+    const d = 0.32 * Math.sin(n.x * 3.1 + 1.2) * Math.cos(n.y * 2.7) + 0.22 * Math.sin(n.z * 4.2 + n.x * 1.3);
+    v.addScaledVector(n, d); pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, glass(0xd9ccff, { att: 0xb49bff, ad: 6, irid: 0.6 }));
+  m.position.set(1.6, -0.6, 0); scene.add(m);
+  const r = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.38, 64, 160), glass(0xffec8a, { att: 0xffd23a, ad: 5 }));
+  r.position.set(-2.4, 1.9, 0.8); r.rotation.set(1.1, 0.4, 0.2); scene.add(r);
+  camera.position.set(0, 0, 13); camera.lookAt(0, 0, 0);
+} else if (sceneName === 'rings') {
+  scene.background = gradientTexture([[0, '#ffe9f2'], [0.5, '#efe4ff'], [1, '#d9ccff']], false);
+  scene.environment = studio(0xffe14a, 0xb79bff);
+  [[0, 0, 0, 2.4], [0.8, 0.2, 0.9, 1.7], [1.5, 0.3, 1.8, 1.1]].forEach(([rx, ry, z, rad], i) => {
+    const m = new THREE.Mesh(new THREE.TorusGeometry(rad, 0.42, 64, 200), glass(i === 1 ? 0xffec8a : 0xcbb8ff, { att: i === 1 ? 0xffd23a : 0xa98cff, ad: 6, irid: 0.5 }));
+    m.rotation.set(1.0 + rx, 0.35 + ry, 0); m.position.set(1.4 + i * 0.35, -0.4 + i * 0.5, z); scene.add(m);
+  });
+  camera.position.set(0, 0, 13); camera.lookAt(0, 0, 0);
+}
+renderer.render(scene, camera);
+window.__done = true;
+</script></body></html>

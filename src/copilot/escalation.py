@@ -15,13 +15,20 @@ def create_escalation(
     intent: str,
     severity: SeverityInfo,
     neighbors: list[dict[str, Any]],
+    *,
+    requester: str | None = None,
+    source: str = "unanswered",
+    attempted_answer: str | None = None,
+    note: str | None = None,
 ) -> int:
+    """source: 'unanswered' (nothing matched) or 'not_resolved' (the employee said the answer didn't help)."""
     ensure_db()
     return execute(
         """
         INSERT INTO escalations
-            (question, intent, severity_label, severity_score, reason_terms, neighbors_json, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'open')
+            (question, intent, severity_label, severity_score, reason_terms, neighbors_json, status,
+             requester, source, attempted_answer, employee_note)
+        VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
         """,
         (
             question,
@@ -30,6 +37,10 @@ def create_escalation(
             severity.score,
             json.dumps(severity.top_terms),
             json.dumps(neighbors),
+            requester,
+            source,
+            attempted_answer,
+            (note or "").strip() or None,
         ),
     )
 
@@ -97,6 +108,20 @@ def resolve_escalation(
                      ref_type="escalation", ref_id=escalation_id, actor=resolved_by)
     except Exception:
         pass
+    # the answer goes back to the person who asked: into their assistant chat, with a notification
+    if esc.get("requester"):
+        try:
+            from .activity import notify
+            from .assistant import save_message
+
+            q = esc["question"]
+            save_message(esc["requester"], "assistant", resolution,
+                         {"kind": "senior_answer", "escalation_id": escalation_id, "question": q,
+                          "resolved_by": resolved_by})
+            notify(f"A Senior Analyst answered your question “{q[:70]}{'…' if len(q) > 70 else ''}”",
+                   page="assistant", ref_id=escalation_id, target_login=esc["requester"])
+        except Exception:
+            pass
     return {"escalation_id": escalation_id, "kb_ticket_id": ticket_id, "status": "resolved"}
 
 

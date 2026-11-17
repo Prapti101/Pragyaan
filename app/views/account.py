@@ -21,7 +21,7 @@ ui.page_header("Choose a new password" if forced else "My account",
                "You signed in with a temporary password. Choose your own password to continue." if forced
                else "Your profile and sign-in settings.")
 
-left, right = st.columns([1.15, 1], gap="large")
+left, right = st.columns([1.15, 1])
 with left:
     with st.container(key="card-password"):
         st.markdown("##### Change password")

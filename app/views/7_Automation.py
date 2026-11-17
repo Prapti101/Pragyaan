@@ -38,7 +38,6 @@ with c4:
     sla = f"{ks['sla_met_pct']:.0f}%" if ks["sla_met_pct"] is not None else "n/a"
     ui.kpi("Done within deadline", sla, f"of {ks['sla_measured']} completed tasks" if ks["sla_measured"]
            else "Measured once tasks are completed", icon_name="verified")
-st.write("")
 
 open_new = st.session_state.pop("open_new_task", False)
 tab_board, tab_rules = st.tabs(["Task board", "Rules"], key="auto_tabs")

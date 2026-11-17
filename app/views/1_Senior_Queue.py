@@ -39,7 +39,6 @@ with m[2]:
     ui.kpi("Normal", str(counts["Normal"]), icon_name="schedule")
 with m[3]:
     ui.kpi("Backlog", str(counts["Backlog"]), icon_name="inbox")
-st.write("")
 
 if not escalations:
     ui.empty_state("task_alt", "No open questions",
@@ -53,6 +52,7 @@ rows = [
         "severity": e.get("severity_label"),
         "score": float(e.get("severity_score") or 0),
         "intent": e.get("intent"),
+        "why": "Answer didn't help" if e.get("source") == "not_resolved" else "No close match",
         "question": e.get("question") or "",
         "created": e.get("created_at"),
     }
@@ -68,6 +68,7 @@ st.dataframe(
         "severity": st.column_config.TextColumn("Severity", width="small"),
         "score": st.column_config.ProgressColumn("Score", min_value=0.0, max_value=1.0, format="%.2f", width="small"),
         "intent": st.column_config.TextColumn("Type", width="small"),
+        "why": st.column_config.TextColumn("Why it's here", width="small"),
         "question": st.column_config.TextColumn("Question", width="large"),
         "created": st.column_config.TextColumn("Asked at"),
     },
@@ -89,6 +90,16 @@ with st.container(key="card-escalation"):
         f":gray[severity {esc.get('severity_label')}, score {float(esc.get('severity_score') or 0):.2f}]"
     )
     st.markdown(f"#### {esc['question']}")
+    if esc.get("requester"):
+        st.caption(f"Asked by {esc['requester']} · {ui.ago(esc.get('created_at'))}. Your answer is sent back to them "
+                   "in the assistant chat.")
+    if esc.get("source") == "not_resolved":
+        st.markdown(ui.label("The assistant answered, but the employee says it didn't solve the problem") +
+                    f'<div class="pg-solution">{ui.esc(ui.clip(esc.get("attempted_answer") or "", 900))}</div>',
+                    unsafe_allow_html=True)
+        if esc.get("employee_note"):
+            st.markdown(ui.label("What's still wrong, in their words") +
+                        f"<div style='color:var(--ink)'>{ui.esc(esc['employee_note'])}</div>", unsafe_allow_html=True)
     terms = esc.get("reason_terms") or []
     if terms:
         st.markdown("**Why it scored this way:** " + " ".join(f":gray-badge[{t}]" for t in terms))
@@ -99,8 +110,8 @@ with st.container(key="card-escalation"):
         for n in esc.get("neighbors") or []:
             ans = str(n.get("answer", ""))[:200]
             st.markdown(
-                f"**Ticket {n.get('ticket_id')}** :gray[similarity {float(n.get('similarity', 0)):.2f}]  \n"
-                f"{n.get('snippet', '')[:160]}" + (f"  \n:gray[Answer: {ans}]" if ans else "")
+                f"**Ticket {n.get('ticket_id')}** :gray[{float(n.get('similarity') or 0):.0%} match]  \n"
+                f"{ui.clip(n.get('snippet', ''), 160)}" + (f"  \n:gray[Answer: {ans}]" if ans else "")
             )
     with right:
         resolution = st.text_area(
@@ -116,6 +127,8 @@ with st.container(key="card-escalation"):
                 result = resolve_escalation(esc["id"], resolution.strip(), resolved_by=actor)
                 st.session_state["queue_flash"] = (
                     f"Resolved #{result['escalation_id']} and added it to the knowledge base as ticket "
-                    f"{result['kb_ticket_id']}. Ask the same question in the AI Assistant to see it answered."
+                    f"{result['kb_ticket_id']}." + (" The answer was sent to the person who asked."
+                                                    if esc.get("requester") else
+                                                    " Ask the same question in the AI Assistant to see it answered.")
                 )
                 st.rerun()

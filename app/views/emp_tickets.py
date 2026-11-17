@@ -32,7 +32,7 @@ tab = st.segmented_control("View", list(tab_opts), format_func=tab_opts.get, key
                            label_visibility="collapsed") or "mine"
 rows = mine if tab == "mine" else assigned
 
-f1, f2 = st.columns([1, 2])
+f1, f2 = st.columns([1, 2.4])
 show = f1.selectbox("Show", ["All", "Active", "Resolved"], key="emp_filter", label_visibility="collapsed")
 q = f2.text_input("Filter", placeholder="Filter by words or #number", key="emp_q", label_visibility="collapsed",
                   icon=":material/filter_list:")
@@ -65,18 +65,22 @@ if focus in ids:
 if st.session_state.get(sel_key) not in ids:
     st.session_state[sel_key] = ids[0]
 
-left, right = st.columns([1, 1.45], gap="medium")
+left, right = st.columns([1, 1.6])
 with left:
-    with st.container(key="card-mt-list", height=640):
+    with st.container(key="card-mt-list", height=640 if len(rows) > 6 else "content", gap="small"):
+        st.markdown(ui.label(f"{len(rows)} ticket{'s' if len(rows) != 1 else ''}"), unsafe_allow_html=True)
         for t in rows:
             active = t["id"] == st.session_state[sel_key]
-            st.markdown(f"{ui.stage_badge(t['stage'])} {ui.priority_badge(t['priority'])}", unsafe_allow_html=True)
-            if st.button(f"#{t['id']} · {ui.clip(t['subject'], 60)}", key=f"mt-pick-{tab}-{t['id']}",
-                         type="primary" if active else "tertiary", width="stretch"):
-                st.session_state[sel_key] = t["id"]
-                st.rerun()
-            st.caption(f"Raised {ui.ago(t['created_at'])}" + (f" by {t['requester_name']}" if tab == "assigned" and
-                                                               t.get("requester_name") else ""))
+            with st.container(key=f"mtrow-{'on-' if active else ''}{tab}-{t['id']}"):
+                by = f" by {t['requester_name']}" if tab == "assigned" and t.get("requester_name") else ""
+                st.markdown(f"<div class='pg-mt' aria-hidden='true'><div>{ui.stage_badge(t['stage'])} {ui.priority_badge(t['priority'])}</div>"
+                            f"<div class='t'>#{t['id']} · {ui.esc(ui.clip(t['subject'], 70))}</div>"
+                            f"<div class='s'>Raised {ui.ago(t['created_at'])}{ui.esc(by)}</div></div>",
+                            unsafe_allow_html=True)
+                if st.button(f"#{t['id']} · {ui.clip(t['subject'], 60)}", key=f"mt-pick-{tab}-{t['id']}",
+                             type="primary" if active else "tertiary", width="stretch"):
+                    st.session_state[sel_key] = t["id"]
+                    st.rerun()
 
 with right:
     try:
@@ -84,13 +88,14 @@ with right:
     except PermissionDenied as e:
         st.error(str(e), icon=":material/lock:")
         st.stop()
-    with st.container(key="card-mt-detail"):
+    with st.container(key="card-fit-mt-detail"):
         st.markdown(f"#### #{t['id']} {ui.esc(t['subject'])}", unsafe_allow_html=True)
-        st.markdown(f"{ui.stage_badge(t['stage'])} {ui.priority_badge(t['priority'])} &nbsp;<span class='pg-muted'>"
-                    f"Raised {ui.local_time(t['created_at'])} · updated {ui.ago(t['updated_at'])}</span>",
+        st.markdown(f"<div>{ui.stage_badge(t['stage'])} {ui.priority_badge(t['priority'])} &nbsp;<span class='pg-muted'>"
+                    f"Raised {ui.local_time(t['created_at'])} · updated {ui.ago(t['updated_at'])}</span></div>",
                     unsafe_allow_html=True)
         st.markdown(ui.progress_steps(t), unsafe_allow_html=True)
-        st.markdown(ui.md_lines(t["body"]))
+        st.markdown(ui.label("Description") + "<div style='color:var(--ink);line-height:1.6;white-space:pre-wrap'>"
+                    f"{ui.esc(t['body'] or '')}</div>", unsafe_allow_html=True)
         info = [f"**Priority** {t['priority']} (model {t['predicted_priority']}, {t['confidence']:.0%} confident"
                 f"{'; adjusted by a Senior Analyst' if t['corrected'] else ''})" if t.get("confidence") is not None
                 else f"**Priority** {t['priority']}"]
@@ -101,10 +106,14 @@ with right:
         st.markdown("  \n".join(info))
 
         if t["stage"] == "suggested":
-            st.markdown(f"**Recommended solution** <span class='pg-muted'>from resolved ticket #{t['match_ticket_id']}"
-                        f" · {t['match_similarity']:.0%} similar</span>", unsafe_allow_html=True)
-            st.markdown(f'<div class="pg-solution">{ui.esc(t["suggested_solution"] or "")}</div>',
+            st.markdown(ui.label("Recommended solution") +
+                        f"<div class='pg-muted' style='margin-bottom:.5rem'>From resolved ticket #{t['match_ticket_id']}"
+                        f" · {t['match_similarity']:.0%} match</div>"
+                        f'<div class="pg-solution">{ui.esc(t["suggested_solution"] or "")}</div>',
                         unsafe_allow_html=True)
+            st.markdown(ui.why_panel(ui.ticket_match_explanation(f"{t['subject']}. {t['body']}", t.get("match_ticket_id"),
+                                                                 t.get("suggested_solution"), t.get("match_similarity")),
+                                     "Why this solution"), unsafe_allow_html=True)
             if tab == "mine":
                 st.caption("Did it fix the problem? Close the ticket, or send it to a Senior Analyst.")
                 a, b = st.columns(2)
@@ -127,8 +136,12 @@ with right:
 
         if t.get("resolution"):
             self_service = t.get("review_status") == "self_resolved"
-            st.markdown("**Solution that worked**" if self_service else "**Solution**")
-            st.markdown(f'<div class="pg-solution">{ui.esc(t["resolution"])}</div>', unsafe_allow_html=True)
+            st.markdown(ui.label("Solution that worked" if self_service else "Solution") +
+                        f'<div class="pg-solution">{ui.esc(t["resolution"])}</div>', unsafe_allow_html=True)
+            if self_service and t.get("match_similarity") is not None:
+                st.markdown(ui.why_panel(ui.ticket_match_explanation(
+                    f"{t['subject']}. {t['body']}", t.get("match_ticket_id"), t["resolution"], t.get("match_similarity")),
+                    "Why this solution was suggested"), unsafe_allow_html=True)
             if self_service:
                 st.caption(f"Closed by you {ui.ago(t.get('resolved_at'))} using a recommended solution. The Senior "
                            "Analysts see it as completed.")
@@ -146,7 +159,6 @@ with right:
 
         # --- actions for the person who raised the ticket
         if tab == "mine" and t["status"] == "resolved":
-            st.write("")
             a, b = st.columns(2)
             if a.button("This solved my issue", type="primary", icon=":material/check_circle:", key=f"mt-ok-{t['id']}",
                         width="stretch"):
@@ -188,7 +200,7 @@ with right:
                     st.toast(f"Ticket #{t['id']} resolved.", icon=":material/task_alt:")
                     st.rerun()
 
-    with st.container(key="card-mt-timeline"):
+    with st.container(key="card-fit-mt-timeline"):
         st.markdown("##### Timeline")
         events = ticket_timeline(t["id"])
         if events:

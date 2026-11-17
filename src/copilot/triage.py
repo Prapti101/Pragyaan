@@ -911,17 +911,19 @@ def search_tickets_for(q: str, actor: dict, k: int = 8) -> list[dict]:
 def find_solutions(text: str, k: int = 3, min_similarity: float = 0.40) -> dict:
     """Existing solution recommendations for a problem description: the closest resolved tickets
     (with their recorded answers) and matching Knowledge Hub passages. `strong` marks matches above
-    the threshold PRAGYAAN uses to reuse a solution automatically."""
+    the threshold PRAGYAAN uses to reuse a solution automatically. `severity` is the priority model's estimate
+    for the problem itself (label, probability, routing bucket and the words that drove it)."""
     from .config import DOC_SIM_THRESHOLD, SIM_THRESHOLD
 
     text = (text or "").strip()
-    out = {"tickets": [], "documents": [], "errors": []}
+    out = {"tickets": [], "documents": [], "errors": [], "query": text, "best": 0.0}
     if len(text) < 4:
         return out
     try:
         from .retrieval import search
 
         for h in search(text, k=k + 2):
+            out["best"] = max(out["best"], float(h.similarity))  # closest ticket, even when too weak to show
             if h.similarity >= min_similarity and (h.answer or "").strip():
                 out["tickets"].append({"ticket_id": h.ticket_id, "similarity": float(h.similarity),
                                        "snippet": h.snippet, "answer": h.answer,
@@ -933,8 +935,18 @@ def find_solutions(text: str, k: int = 3, min_similarity: float = 0.40) -> dict:
     try:
         from .knowledge import search_documents
 
+        doc_hits = search_documents(text, k=k)
         out["documents"] = [dict(h, strong=h["similarity"] >= DOC_SIM_THRESHOLD)
-                            for h in search_documents(text, k=k) if h["similarity"] >= min_similarity - 0.05]
+                            for h in doc_hits if h["similarity"] >= min_similarity - 0.05]
     except Exception as e:
         out["errors"].append(f"Document search unavailable: {e}")
+    try:
+        from .severity import predict_severity, routing_bucket, severity_probabilities
+
+        sev = predict_severity(text)
+        conf = severity_probabilities(text).get(sev.label)
+        out["severity"] = {"label": sev.label, "score": float(sev.score), "bucket": routing_bucket(float(sev.score)),
+                           "confidence": float(conf) if conf is not None else None, "terms": list(sev.top_terms)}
+    except Exception as e:  # noqa: BLE001 - the fixes still show without the priority model
+        out["errors"].append(f"Priority model unavailable: {e}")
     return out

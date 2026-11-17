@@ -1,8 +1,10 @@
-"""AI Assistant: answers from uploaded documents, then the ticket knowledge base,
-otherwise escalates to the senior queue (the existing closed loop).
+"""AI Assistant: the company's conversational assistant (talks like ChatGPT or Gemini, but only about work here).
+It knows the company's uploaded documents and how past support tickets were solved, and politely declines topics
+unrelated to work.
 
-Without an LLM key every answer is retrieved text (a passage or a past ticket's
-answer) with its source; nothing is generated or guessed.
+The language model writes every reply, with the conversation so far and the related documents and past cases as
+background. Without a working model the assistant says so and shows the closest real passage or past answer;
+nothing is made up. Match scores and escalation to a Senior Analyst live in Find a fix, not in the chat.
 """
 
 from __future__ import annotations
@@ -115,80 +117,306 @@ def _summarize_request(target: str) -> dict:
     return {"kind": "summary", "doc_id": doc["id"], "title": doc["title"], **s}
 
 
-def answer(question: str, user_email: str | None = None) -> dict:
-    """Route a question. Returns a dict the UI renders; also persisted when user_email is given."""
+_SYSTEM_PROMPT = """You are PRAGYAAN, the AI assistant of this company, for its employees. Talk naturally and warmly, the way
+ChatGPT or Gemini do: answer directly, explain clearly, use short paragraphs, and numbered steps or bullet points when
+they help. If a request is unclear, ask a short follow-up question.
+
+You only help with work at this company:
+- the company's policies, processes, tools and documents ("how does X work here?"), and summarizing them;
+- IT, HR, access, account, device, software and other workplace problems, and explaining fixes step by step;
+- writing work emails, messages or requests (to IT, HR, a manager, a colleague or a customer);
+- explaining work and technical concepts an employee needs for their job.
+
+If the message is not about work (for example recipes, films, sports, games, travel plans, relationships, school
+homework, general trivia or jokes), do not answer it. Say in one or two friendly sentences that you are the company's
+work assistant and can only help with work, and give one example of what you can help with. Greetings and thanks are
+fine: reply briefly and say what you can help with.
+
+{context}
+
+Rules:
+- For facts specific to this company (its policies, contacts, internal tools, deadlines, numbers, procedures), rely
+  only on the company material above. If it doesn't cover it, say you don't have that information and suggest
+  raising a ticket from the Home page so the support team can help.
+- When a company document helps, mention its title naturally, e.g. "According to the VPN policy, ...".
+- The past support cases show how similar problems were handled; use them as hints for troubleshooting, but
+  never copy their greetings, placeholders or requests for account numbers.
+- Never mention similarity scores, retrieval, "the context" or "the provided documents" as such.
+- Never claim to be ChatGPT, Gemini or any other product. You are PRAGYAAN, the company's assistant."""
+
+_HELP = ("Hi! I'm PRAGYAAN, your company's work assistant. Ask me how something works here, get help with an IT or "
+         "HR problem, or let me draft a work email. Type “summarize” and a document name to get its key points.")
+
+
+def _prior_turns(prior: list[dict], limit: int = 8) -> list[dict]:
+    """The recent conversation as chat messages (skips empty or system-like entries)."""
+    turns = []
+    for m in prior[-limit:]:
+        text = (m.get("content") or "").strip()
+        if not text:
+            continue
+        turns.append({"role": "user" if m["role"] == "user" else "assistant", "content": text[:1500]})
+    return turns
+
+
+def _gather_context(q: str, prior: list[dict]) -> dict:
+    """Company documents and past support cases related to the message (follow-ups also use the previous
+    question, so "it still drops" finds the VPN material)."""
+    from .knowledge import search_documents
+    from .retrieval import search
+
+    query = q
+    if len(q.split()) < 8:
+        prev = next((m["content"] for m in reversed(prior) if m["role"] == "user" and m.get("content")), "")
+        if prev:
+            query = f"{prev} {q}"
+    try:
+        docs = [h for h in search_documents(query, k=4) if h["similarity"] >= DOC_SIM_THRESHOLD - 0.1][:3]
+    except Exception:
+        docs = []
+    try:
+        tickets = [h for h in search(query, k=4) if h.similarity >= SIM_THRESHOLD - 0.05 and (h.answer or "").strip()][:3]
+    except Exception:
+        tickets = []
+    return {"docs": docs, "tickets": tickets}
+
+
+def _context_block(ctx: dict) -> str:
+    parts = []
+    if ctx.get("focus"):
+        parts.append(f"THE FIX THE EMPLOYEE IS ASKING ABOUT (from {ctx['focus']['source']}). Explain how to apply it "
+                     f"to their problem, step by step:\n{ctx['focus']['text']}")
+    if ctx["docs"]:
+        parts.append("COMPANY DOCUMENTS:\n" + "\n\n".join(
+            f"[{h['title']}]\n{h['text'][:1800]}" for h in ctx["docs"]))
+    if ctx["tickets"]:
+        parts.append("PAST SUPPORT CASES (problem, then how support replied):\n" + "\n\n".join(
+            f"Problem: {(h.text or h.snippet)[:500]}\nReply: {h.answer[:600]}" for h in ctx["tickets"]))
+    return "\n\n".join(parts) if parts else "No company documents or past support cases relate to this message."
+
+
+def _fallback(q: str, ctx: dict, err: str | None) -> tuple[str, str]:
+    """Without a working language model: say so honestly, and show the closest real material if there is any.
+    Returns (text, what it is)."""
+    from .explain import is_small_talk
+
+    why = (f"I can't reach the language model right now ({err})" if err else
+           "No language model is connected (add GROQ_API_KEY to .env)")
+    if is_small_talk(q):
+        return _HELP, "help"
+    if ctx.get("focus"):
+        return f"{why}, so here is {ctx['focus']['source']} as it was written:\n\n{ctx['focus']['text']}", "focus"
+    if ctx["docs"] and ctx["docs"][0]["similarity"] >= DOC_SIM_THRESHOLD:
+        top = ctx["docs"][0]
+        return (f"{why}, so here is the most relevant part of **{top['title']}**:\n\n"
+                f"{_best_paragraph(q, top['text'])}"), "document"
+    if ctx["tickets"] and ctx["tickets"][0].similarity >= SIM_THRESHOLD:
+        return (f"{why}, so here is how support answered a very similar problem:\n\n"
+                f"{ctx['tickets'][0].answer}"), "ticket"
+    return (f"{why}, so I can't write an answer. For known problems, try **Find a fix** on your Home page; it "
+            "searches solved tickets and your company's documents without the language model."), "none"
+
+
+def answer_stream(question: str, user_email: str | None = None, out: dict | None = None, *,
+                  focus: dict | None = None):
+    """Reply to a chat message, yielding the text as it is written. `out` receives the stored message metadata.
+
+    The reply is written by the language model with the conversation so far and related company documents and
+    past support cases as background. "summarize <document>" and a ticket overview still work as commands.
+    Nothing is escalated from here; known-fix search with match scores and escalation live in Find a fix.
+    `focus` ({"source", "text"}) is a fix opened from Find a fix ("Explain this step by step").
+    """
     import time
 
-    from .intent import predict_intent
-    from .knowledge import search_documents
-    from .llm import complete, is_no_answer, provider_name
-    from .pipeline import ask
+    from .llm import chat_stream, last_error, last_model, provider_name
 
+    out = {} if out is None else out
     t0 = time.perf_counter()
     q = (question or "").strip()
     if not q:
-        return {"kind": "info", "text": "Type a question first."}
+        out.update(kind="info", text="Type a question first.")
+        yield out["text"]
+        return
+    prior = history(user_email, limit=12) if user_email else []
     if user_email:
         save_message(user_email, "user", q)
+    try:
+        from .intent import predict_intent
+
+        intent = predict_intent(q)
+    except Exception:
+        intent = "Request"
 
     m = _SUMMARY_RE.match(q)
-    if m:
-        out = _summarize_request(m.group(2))
-    elif re.search(r"\b(overview|summary|summari[sz]e)\b", q, re.I) and _TICKET_OVERVIEW_RE.search(q):
-        out = _ticket_overview()
+    if m or (re.search(r"\b(overview|summary|summari[sz]e)\b", q, re.I) and _TICKET_OVERVIEW_RE.search(q)):
+        res = _summarize_request(m.group(2)) if m else _ticket_overview()
+        out.update(res)
+        if res.get("kind") == "summary":
+            yield res.get("summary") or "\n".join(f"- {s}" for s in res.get("sentences") or []) or \
+                "The document is too short to summarize."
+        else:
+            yield res.get("text") or ""
     else:
-        out = None
-        try:
-            doc_hits = search_documents(q, k=4)
-        except Exception:
-            doc_hits = []
-        try:
-            intent = predict_intent(q)
-        except FileNotFoundError:
-            intent = "Request"
-        if doc_hits and doc_hits[0]["similarity"] >= DOC_SIM_THRESHOLD:
-            top = [h for h in doc_hits if h["similarity"] >= DOC_SIM_THRESHOLD - 0.1][:3]
-            text, method = None, "retrieval"
-            if provider_name():
-                ctx = "\n\n".join(f"[D{i + 1}] {h['title']}:\n{h['text']}" for i, h in enumerate(top))
-                raw = complete(
-                    "Answer the employee's question using ONLY the document passages below. "
-                    "If they do not contain the answer, reply exactly: NO_ANSWER. Cite passages as [D1], [D2].\n\n"
-                    f"PASSAGES:\n{ctx}\n\nQUESTION: {q}"
-                )
-                if raw and not is_no_answer(raw):
-                    text, method = raw, provider_name()
-            if text is None and not provider_name():
-                text = _best_paragraph(q, top[0]["text"])
-            if text is not None:
-                out = {
-                    "kind": "documents", "text": text, "method": method, "intent": intent,
-                    "confidence": doc_hits[0]["similarity"], "doc_sources": top,
-                }
-                out["interaction_id"] = _log(q, intent, text, doc_hits[0]["similarity"],
-                                             int((time.perf_counter() - t0) * 1000))
-        if out is None:
-            resp = ask(q)
-            out = {"kind": resp.route, "text": resp.answer or "", "intent": resp.intent,
-                   "confidence": resp.confidence, "latency_ms": resp.latency_ms,
-                   "sources": [s.model_dump() for s in resp.sources],
-                   "severity": resp.severity.model_dump() if resp.severity else None,
-                   "escalation_id": resp.escalation_id,
-                   "method": provider_name() or "retrieval",
-                   "related_docs": [h for h in doc_hits[:2] if h["similarity"] >= 0.3]}
-            last = fetchall("SELECT id FROM interactions ORDER BY id DESC LIMIT 1")
-            out["interaction_id"] = last[0]["id"] if last else None
-            if resp.route == "escalated":
-                from .activity import log_activity, notify
-
-                log_activity("escalation", f"Question escalated to the senior queue (#{resp.escalation_id})",
-                             ref_type="escalation", ref_id=resp.escalation_id, actor=user_email)
-                notify(f"New question in the senior queue (#{resp.escalation_id})", level="info",
-                       page="queue", ref_id=resp.escalation_id)
+        ctx = _gather_context(q, prior)
+        if focus and (focus.get("text") or "").strip():
+            ctx["focus"] = {"source": str(focus.get("source") or "Find a fix")[:120], "text": str(focus["text"])[:2500]}
+        messages = ([{"role": "system", "content": _SYSTEM_PROMPT.format(context=_context_block(ctx))}]
+                    + _prior_turns(prior) + [{"role": "user", "content": q}])
+        parts: list[str] = []
+        if provider_name():
+            for chunk in chat_stream(messages):
+                parts.append(chunk)
+                yield chunk
+        text, err = "".join(parts).strip(), last_error()
+        method, used = (last_model() if text else None), "model"
+        if not text:
+            text, used = _fallback(q, ctx, err)
+            yield text
+        elif err:
+            note = f"\n\n_(The reply was cut off: {err}.)_"
+            text += note
+            yield note
+        out.update(
+            kind="ai", text=text, method=method, used=used, intent=intent,
+            llm_error=None if method and not err else err,
+            doc_sources=[{"doc_id": h["doc_id"], "title": h["title"], "collection": h.get("collection"),
+                          "similarity": h["similarity"], "text": h["text"][:600]} for h in ctx["docs"]],
+            sources=[{"ticket_id": h.ticket_id, "similarity": round(h.similarity, 4), "snippet": h.snippet}
+                     for h in ctx["tickets"]],
+            # the message looks like a support problem that solved tickets cover: offer Find a fix (not when the
+            # employee came from Find a fix already)
+            find_fix=bool(ctx["tickets"]) and not ctx.get("focus") and used == "model",
+            focus_source=(ctx.get("focus") or {}).get("source"),
+        )
+        best = max([h["similarity"] for h in ctx["docs"]] + [h.similarity for h in ctx["tickets"]] + [0.0])
+        out["interaction_id"] = _log(q, intent, text, round(best, 4), int((time.perf_counter() - t0) * 1000))
+    out["question"] = q
     out["latency_ms"] = out.get("latency_ms") or int((time.perf_counter() - t0) * 1000)
     if user_email:
-        save_message(user_email, "assistant", out.get("text") or "", out)
+        out["message_id"] = save_message(user_email, "assistant", out.get("text") or "", out)
+
+
+def answer(question: str, user_email: str | None = None, *, focus: dict | None = None) -> dict:
+    """Reply to a chat message without streaming. Returns the stored message metadata (text, sources ...)."""
+    out: dict = {}
+    for _ in answer_stream(question, user_email, out, focus=focus):
+        pass
     return out
 
 
-__all__ = ["answer", "history", "clear_history", "save_message", "SIM_THRESHOLD", "DOC_SIM_THRESHOLD"]
+def rate_answer(message_id: int, user_email: str, thumbs: str) -> None:
+    """Thumbs up / down on one of the user's own assistant replies (feeds the helpfulness numbers)."""
+    from .feedback import set_thumbs
+
+    msg, meta = _own_answer(message_id, user_email)
+    if meta.get("interaction_id"):
+        set_thumbs(int(meta["interaction_id"]), thumbs)
+    meta["thumbs"] = thumbs
+    execute("UPDATE chat_messages SET meta_json = ? WHERE id = ?", (json.dumps(meta), msg["id"]))
+
+
+def escalate_question(question: str, user_email: str, *, best_similarity: float = 0.0, neighbors: list | None = None,
+                      note: str | None = None) -> dict:
+    """Find a fix found nothing that helped: the employee sends the question to the Senior Queue. Their answer
+    comes back as a notification and into the assistant chat. Returns the escalation id and its explanation."""
+    from .activity import log_activity, notify
+    from .escalation import create_escalation
+    from .explain import explain_escalation
+    from .schemas import SeverityInfo
+
+    q = (question or "").strip()
+    if not q:
+        raise ValueError("Describe the problem first.")
+    try:
+        from .severity import predict_severity
+
+        severity = predict_severity(f"{q}. {note or ''}".strip(". "))
+    except FileNotFoundError:
+        severity = SeverityInfo(label="medium", score=0.5, top_terms=[])
+    try:
+        from .intent import predict_intent
+
+        intent = predict_intent(q)
+    except Exception:
+        intent = "Request"
+    esc_id = create_escalation(q, intent, severity, neighbors or [], requester=user_email,
+                               source="not_resolved" if neighbors else "unanswered", note=note)
+    execute("INSERT INTO interactions (question, route, intent, confidence, severity_label, severity_score, "
+            "escalation_id) VALUES (?, 'escalated', ?, ?, ?, ?, ?)",
+            (q, intent, round(float(best_similarity or 0), 4), severity.label, severity.score, esc_id))
+    log_activity("escalation", f"Find a fix found no answer; question escalated to the senior queue (#{esc_id})",
+                 ref_type="escalation", ref_id=esc_id, actor=user_email)
+    notify(f"New question in the senior queue (#{esc_id}): “{q[:60]}”", level="info", page="queue", ref_id=esc_id)
+    return {"escalation_id": esc_id, "severity": severity.model_dump(),
+            "explain": explain_escalation(q, best_similarity, severity.model_dump())}
+
+
+def _own_answer(message_id: int, user_email: str) -> tuple[dict, dict]:
+    """The assistant message `message_id`, only if it belongs to `user_email` (nobody can act on another
+    person's chat), with its metadata."""
+    row = fetchall("SELECT * FROM chat_messages WHERE id = ? AND user_email = ? AND role = 'assistant'",
+                   (int(message_id), user_email))
+    if not row:
+        raise ValueError("That answer isn't in your conversation.")
+    msg = row[0]
+    return msg, json.loads(msg.get("meta_json") or "{}")
+
+
+def _question_for(msg: dict, meta: dict, user_email: str) -> str:
+    if meta.get("question"):
+        return meta["question"]
+    prev = fetchall("SELECT content FROM chat_messages WHERE user_email = ? AND role = 'user' AND id < ? "
+                    "ORDER BY id DESC LIMIT 1", (user_email, msg["id"]))
+    return prev[0]["content"] if prev else ""
+
+
+def mark_answer_resolved(message_id: int, user_email: str) -> None:
+    """The employee says the answer solved it: recorded as helpful."""
+    from .feedback import set_thumbs
+
+    msg, meta = _own_answer(message_id, user_email)
+    if meta.get("interaction_id"):
+        set_thumbs(int(meta["interaction_id"]), "up")
+    meta["feedback"] = "resolved"
+    execute("UPDATE chat_messages SET meta_json = ? WHERE id = ?", (json.dumps(meta), msg["id"]))
+
+
+def escalate_answer(message_id: int, user_email: str, note: str | None = None) -> int:
+    """The employee says the answer didn't solve it: the question goes to the Senior Queue with the answer
+    they were given and their note. The senior's reply comes back into their chat. Returns the escalation id."""
+    from .activity import log_activity, notify
+    from .escalation import create_escalation
+    from .feedback import set_thumbs
+    from .schemas import SeverityInfo
+    from .severity import predict_severity
+
+    msg, meta = _own_answer(message_id, user_email)
+    if meta.get("escalated_id"):
+        return int(meta["escalated_id"])
+    if meta.get("kind") not in ("documents", "resolved", "ai"):
+        raise ValueError("Only answers can be escalated.")
+    q = _question_for(msg, meta, user_email)
+    try:
+        severity = predict_severity(f"{q}. {note or ''}".strip(". "))
+    except FileNotFoundError:
+        severity = SeverityInfo(label="medium", score=0.5, top_terms=[])
+    neighbors = [{"ticket_id": s.get("ticket_id"), "similarity": s.get("similarity"), "snippet": s.get("snippet"),
+                  "answer": ""} for s in meta.get("sources") or []]
+    neighbors += [{"ticket_id": f"doc {d.get('doc_id')}", "similarity": d.get("similarity"),
+                   "snippet": f"{d.get('title')}: {(d.get('text') or '')[:200]}", "answer": ""}
+                  for d in meta.get("doc_sources") or []]
+    esc_id = create_escalation(q, meta.get("intent") or "Request", severity, neighbors, requester=user_email,
+                               source="not_resolved", attempted_answer=msg.get("content") or "", note=note)
+    if meta.get("interaction_id"):
+        set_thumbs(int(meta["interaction_id"]), "down")
+    meta["escalated_id"], meta["feedback"] = esc_id, "not_resolved"
+    execute("UPDATE chat_messages SET meta_json = ? WHERE id = ?", (json.dumps(meta), msg["id"]))
+    log_activity("escalation", f"Assistant answer didn't solve it; question escalated to the senior queue (#{esc_id})",
+                 ref_type="escalation", ref_id=esc_id, actor=user_email)
+    notify(f"An employee says the assistant's answer didn't help (#{esc_id}): “{q[:60]}”", level="info",
+           page="queue", ref_id=esc_id)
+    return esc_id
+
+
+__all__ = ["answer", "answer_stream", "history", "clear_history", "save_message", "rate_answer",
+           "mark_answer_resolved", "escalate_answer", "escalate_question", "SIM_THRESHOLD", "DOC_SIM_THRESHOLD"]

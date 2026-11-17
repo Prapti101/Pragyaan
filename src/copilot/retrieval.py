@@ -21,6 +21,7 @@ class RetrievedTicket:
     snippet: str
     answer: str
     metadata: dict[str, Any]
+    text: str = ""  # the full problem text stored for this ticket
 
 
 @lru_cache(maxsize=1)
@@ -53,40 +54,52 @@ def _distance_to_similarity(distance: float) -> float:
     return max(0.0, min(1.0, 1.0 - float(distance)))
 
 
-def search(query: str, k: int = TOP_K) -> list[RetrievedTicket]:
+def search(query: str, k: int = TOP_K, *, also: list[str] | None = None) -> list[RetrievedTicket]:
+    """Top-k tickets closest in meaning to `query`.
+
+    `also` holds extra wordings of the same question (for example a ticket-style rewrite of a short message).
+    Every wording is searched and each ticket keeps its best similarity, so a rewording can only help a ticket
+    that really is close to one of them.
+    """
     collection = get_collection()
     if collection.count() == 0:
         return []
 
-    q = clean_text(query, strict=False)
-    q_emb = embed_texts([q])[0]
+    texts = [clean_text(query, strict=False)]
+    texts += [clean_text(t, strict=False) for t in (also or []) if t and t.strip()]
     result = collection.query(
-        query_embeddings=[q_emb],
+        query_embeddings=embed_texts(texts),
         n_results=min(k, collection.count()),
         include=["documents", "metadatas", "distances"],
     )
 
-    hits: list[RetrievedTicket] = []
-    docs = result.get("documents", [[]])[0]
-    metas = result.get("metadatas", [[]])[0]
-    dists = result.get("distances", [[]])[0]
-    ids = result.get("ids", [[]])[0]
-
-    for doc, meta, dist, doc_id in zip(docs, metas, dists, ids):
-        meta = meta or {}
-        ticket_id = int(meta.get("ticket_id", doc_id.replace("ticket_", "") or 0))
-        answer = str(meta.get("answer", ""))
-        snippet = (doc or "")[:240]
-        hits.append(
-            RetrievedTicket(
-                ticket_id=ticket_id,
-                similarity=_distance_to_similarity(dist),
-                snippet=snippet,
-                answer=answer,
+    best: dict[str, RetrievedTicket] = {}
+    for docs, metas, dists, ids in zip(result.get("documents") or [], result.get("metadatas") or [],
+                                       result.get("distances") or [], result.get("ids") or []):
+        for doc, meta, dist, doc_id in zip(docs, metas, dists, ids):
+            meta = meta or {}
+            sim = _distance_to_similarity(dist)
+            if doc_id in best and best[doc_id].similarity >= sim:
+                continue
+            best[doc_id] = RetrievedTicket(
+                ticket_id=int(meta.get("ticket_id", doc_id.replace("ticket_", "") or 0)),
+                similarity=sim,
+                snippet=(doc or "")[:240],
+                answer=str(meta.get("answer", "")),
                 metadata=dict(meta),
+                text=doc or "",
             )
-        )
-    return hits
+    return sorted(best.values(), key=lambda h: h.similarity, reverse=True)[:k]
+
+
+def get_ticket_text(ticket_id: int) -> str | None:
+    """The problem text stored in the knowledge base for one resolved ticket (None if it isn't there)."""
+    try:
+        got = get_collection().get(ids=[f"ticket_{int(ticket_id)}"], include=["documents"])
+    except Exception:
+        return None
+    docs = got.get("documents") or []
+    return docs[0] if docs else None
 
 
 def upsert(

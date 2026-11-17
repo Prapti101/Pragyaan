@@ -233,6 +233,14 @@ _ADDED_COLUMNS = {
         ("audience", "TEXT NOT NULL DEFAULT 'all'"),
         ("target_login", "TEXT"),
     ],
+    # who asked (so the senior's answer goes back to them), and, when an employee escalates an answer
+    # that didn't help, what the assistant answered and what they said was still wrong
+    "escalations": [
+        ("requester", "TEXT"),
+        ("source", "TEXT NOT NULL DEFAULT 'unanswered'"),
+        ("attempted_answer", "TEXT"),
+        ("employee_note", "TEXT"),
+    ],
 }
 
 _initialized: set[str] = set()

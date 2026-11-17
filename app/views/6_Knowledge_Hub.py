@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,13 +21,6 @@ user = ui.require_role("employee", "analyst")
 actor = user["login_id"]
 can_edit = user["role"] == "analyst"  # employees read and search; analysts manage documents
 
-ui.page_header("Knowledge Hub",
-               "Upload policies, runbooks, reports and other documents. Text is extracted and indexed so the "
-               "assistant and search can find the right passage by meaning, not just keywords." if can_edit else
-               "Company policies, guides and runbooks, searchable by meaning. Open a document to read it or get a "
-               "summary.")
-
-
 def _size(n: int | None) -> str:
     n = int(n or 0)
     return f"{n / 1_048_576:.1f} MB" if n >= 1_048_576 else f"{max(1, n // 1024)} KB"
@@ -36,6 +28,29 @@ def _size(n: int | None) -> str:
 
 cols = collections()
 col_names = [c["collection"] for c in cols]
+docs_all = list_documents()
+n_passages = sum(d["chunk_count"] or 0 for d in docs_all)
+st.markdown("""<style>
+.st-key-card-cobalt-kh-search { padding: 1.5rem 1.6rem 1.3rem !important; border-radius: 20px !important; box-shadow: 8px 8px 0 var(--ink) !important; }
+.st-key-card-cobalt-kh-search [data-testid="stTextInputRootElement"] { background: var(--ivory) !important; min-height: 3.4rem; }
+.st-key-card-cobalt-kh-search [data-testid="stTextInputRootElement"] :is(input, span) { color: var(--ink) !important; font-size: 1.05rem; }
+.st-key-card-cobalt-kh-search [data-testid="stButtonGroup"] button[data-variant] { background: transparent !important; border-color: rgba(244,238,225,.6) !important; }
+.st-key-card-cobalt-kh-search [data-testid="stButtonGroup"] button[data-variant] :is(p, span) { color: var(--ivory) !important; }
+.st-key-card-cobalt-kh-search [data-testid="stButtonGroup"] button[data-variant]:is([aria-checked="true"], [data-selected="true"], [aria-pressed="true"]) { background: var(--lime) !important; border-color: var(--ink) !important; }
+.st-key-card-cobalt-kh-search [data-testid="stButtonGroup"] button[data-variant]:is([aria-checked="true"], [data-selected="true"], [aria-pressed="true"]) :is(p, span) { color: var(--ink) !important; }
+.pg-kh-q { font-family: var(--display); font-weight: 800; font-stretch: 86%; font-size: clamp(1.6rem, 3vw, 2.3rem); line-height: 1; letter-spacing: -0.02em; margin: 0 0 .9rem; color: var(--ivory); }
+.pg-doc .ic.t-pdf { background: var(--coral); } .pg-doc .ic.t-docx { background: var(--cobalt); color: var(--ivory); } .pg-doc .ic.t-md, .pg-doc .ic.t-txt { background: var(--lime); }
+.pg-hit { padding: .85rem 0; border-bottom: 1.5px dashed var(--line); } .pg-hit:last-child { border-bottom: 0; }
+.pg-hit p { margin: .35rem 0 0 !important; color: var(--ink-2); font-size: .92rem; line-height: 1.5; }
+</style>""", unsafe_allow_html=True)
+ui.masthead("Knowledge Hub", "Every answer the company has written down",
+            "Policies, guides and runbooks, indexed by meaning so the assistant and search find the right passage, "
+            "not just the right keywords." if not can_edit else
+            "Upload policies, runbooks and reports. Text is extracted and indexed so the assistant and search find the "
+            "right passage by meaning, not just keywords.",
+            fig=n_passages, fig_label=f"passages indexed from {len(docs_all)} document{'s' if len(docs_all) != 1 else ''}",
+            tone=ui.LIME, rot=-2.5)
+
 
 if can_edit:
     with st.expander("Upload documents", icon=":material/upload_file:", expanded=not col_names):
@@ -87,59 +102,75 @@ if not docs_all:
                            "assistant, which answers from thousands of resolved tickets.")
     st.stop()
 
-left, main = st.columns([1, 3.2], gap="large")
-with left:
-    with st.container(key="card-collections"):
-        st.markdown("##### Collections")
-        options = ["All documents", *col_names]
-        counts = {"All documents": len(docs_all), **{c["collection"]: c["n"] for c in cols}}
-        chosen = st.radio("Collection", options, format_func=lambda o: f"{o}  ({counts.get(o, 0)})",
-                          label_visibility="collapsed", key="kh_collection")
-        st.caption(f"{sum(d['chunk_count'] or 0 for d in docs_all):,} indexed passages")
-
+options = ["All documents", *col_names]
+counts = {"All documents": len(docs_all), **{c["collection"]: c["n"] for c in cols}}
+with st.container(key="card-cobalt-kh-search"):
+    st.markdown('<div class="pg-kh-q">Search by meaning</div>', unsafe_allow_html=True)
+    q = st.text_input("Search documents", placeholder="Describe what you're looking for, e.g. how do I request VPN access",
+                      icon=":material/search:", key="kh_q", label_visibility="collapsed")
+    if st.session_state.get("kh_collection") not in options:
+        st.session_state["kh_collection"] = "All documents"
+    chosen = st.segmented_control("Collection", options, format_func=lambda o: f"{o} · {counts.get(o, 0)}",
+                                  key="kh_collection", label_visibility="collapsed", required=True) or "All documents"
 collection = None if chosen == "All documents" else chosen
 
+main = st.container()
 with main:
-    q = st.text_input("Search documents", placeholder="Ask or describe what you're looking for, e.g. how do I request VPN access",
-                      icon=":material/search:", key="kh_q")
     if q.strip():
         with st.spinner("Searching by meaning…"):
             hits = search_documents(q, k=8, collection=collection)
         hits = [h for h in hits if h["similarity"] >= 0.2]
         with st.container(key="card-kh-results"):
-            st.markdown(f"##### {len(hits)} matching passage{'s' if len(hits) != 1 else ''}")
+            st.markdown(f"##### {len(hits)} matching passage{'s' if len(hits) != 1 else ''} for “{ui.esc(ui.clip(q, 60))}”",
+                        unsafe_allow_html=True)
             if not hits:
                 st.caption("No passage is a close match. Try different words, or check another collection.")
+            else:
+                from copilot.config import DOC_SIM_THRESHOLD
+                st.markdown(ui.ladder([{"label": f"Passage {i + 1}", "sub": ui.clip(h["title"], 22), "sim": h["similarity"]}
+                                       for i, h in enumerate(hits)], DOC_SIM_THRESHOLD,
+                                      caption="needed for the assistant to answer from it"), unsafe_allow_html=True)
             for i, h in enumerate(hits):
                 a, b = st.columns([5, 1], vertical_alignment="top")
-                a.markdown(f"**{ui.esc(h['title'])}** {ui.soft_badge(h['collection'])} "
-                           f"<span class='pg-muted'>similarity {h['similarity']:.2f}</span>", unsafe_allow_html=True)
-                a.caption(ui.clip(h["text"], 420))
-                if b.button("Open", key=f"hit-{i}-{h['doc_id']}", type="tertiary"):
+                a.markdown(f"<div class='pg-hit'><b>Passage {i + 1} · {ui.esc(h['title'])}</b> {ui.soft_badge(h['collection'])} "
+                           f"<span class='pg-muted'>{h['similarity']:.0%} similar</span>"
+                           f"<p>{ui.esc(ui.clip(h['text'], 420))}</p></div>", unsafe_allow_html=True)
+                if b.button("Open", key=f"hit-{i}-{h['doc_id']}", type="tertiary", icon=":material/arrow_forward:",
+                            icon_position="right"):
                     st.session_state["kh_open"] = h["doc_id"]
                     st.rerun()
 
     docs = list_documents(collection=collection)
-    df = pd.DataFrame([{
-        "id": d["id"], "title": d["title"], "collection": d["collection"], "type": (d["file_type"] or "").upper(),
-        "size": _size(d["size_bytes"]), "passages": d["chunk_count"], "tags": d["tags"] or "",
-        "uploaded": ui.local_time(d["uploaded_at"]), "by": d["uploaded_by"] or "",
-    } for d in docs])
     open_id = st.session_state.get("kh_open")
-    ids = df["id"].tolist() if len(df) else []
-    event = st.dataframe(
-        df, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row", key="kh_table",
-        height=min(380, 38 + 35 * max(1, len(df))),
-        column_config={"id": None, "title": st.column_config.TextColumn("Title", width="large"),
-                       "collection": "Collection", "type": st.column_config.TextColumn("Type", width="small"),
-                       "size": st.column_config.TextColumn("Size", width="small"),
-                       "passages": st.column_config.NumberColumn("Passages", width="small"),
-                       "tags": "Tags", "uploaded": "Uploaded", "by": "By"},
-    )
-    sel = event.selection.rows if event and event.selection else []
-    if sel:
-        open_id = ids[sel[0]]
-        st.session_state["kh_open"] = open_id
+    TYPE_ICON = {"pdf": "picture_as_pdf", "docx": "article", "txt": "notes", "md": "notes", "csv": "table_chart",
+                 "json": "data_object", "html": "code", "htm": "code", "log": "terminal"}
+    limit = st.session_state.get("kh_limit", 9)
+    ui.section("The shelf", f"{len(docs)} document{'s' if len(docs) != 1 else ''}"
+               f"{' in ' + collection if collection else ''}")
+    for start in range(0, min(len(docs), limit), 3):
+        cols = st.columns(3)
+        for col, d in zip(cols, docs[start:start + 3]):
+            is_open = d["id"] == open_id
+            with col, st.container(key=f"card-kdoc-{'open-' if is_open else ''}{d['id']}"):
+                ftype = (d["file_type"] or "").lower()
+                tags = "".join(ui.soft_badge(t.strip()) + " " for t in (d["tags"] or "").split(",") if t.strip())
+                st.markdown(
+                    f'<div class="pg-doc"><div class="ic t-{ui.esc(ftype)}">{ui.icon(TYPE_ICON.get(ftype, "description"))}</div>'
+                    f'<h4>{ui.esc(ui.clip(d["title"], 60))}</h4>'
+                    f'<div class="meta">{ui.esc(d["collection"])} · {ui.esc(ftype.upper() or "FILE")} · '
+                    f'{_size(d["size_bytes"])} · {int(d["chunk_count"] or 0)} passages</div>'
+                    f'<div class="tags">{tags}</div>'
+                    f'<div class="meta">Added {ui.esc(ui.ago(d["uploaded_at"]))}</div></div>',
+                    unsafe_allow_html=True)
+                if st.button("Reading" if is_open else "Open", key=f"kopen-{d['id']}", width="stretch",
+                             type="primary" if is_open else "secondary",
+                             icon=":material/menu_book:" if is_open else ":material/open_in_full:"):
+                    st.session_state["kh_open"] = d["id"]
+                    st.rerun()
+    if len(docs) > limit and st.button(f"Show more ({len(docs) - limit} left)", key="kh-more", type="tertiary",
+                                       icon=":material/expand_more:"):
+        st.session_state["kh_limit"] = limit + 9
+        st.rerun()
 
     doc = get_document(open_id) if open_id else None
     if not doc:

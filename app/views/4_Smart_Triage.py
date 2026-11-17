@@ -24,9 +24,11 @@ P = st.session_state["_pages"]
 user = ui.require_role("analyst")
 actor = user["login_id"]
 
-ui.page_header("All support tickets",
-               "Every ticket with its predicted priority, workflow stage and owner. Triage new tickets with the "
-               "priority model, correct priorities, assign and resolve.")
+_active = list_tickets(queue="active")
+ui.masthead("Ticket triage", "Every ticket, classified",
+            "Each ticket's predicted priority, workflow stage and owner. Triage new tickets with the priority model, "
+            "correct priorities, assign and resolve.",
+            fig=len(_active), fig_label="tickets open right now", tone=ui.CORAL, rot=2)
 
 status = model_status()
 if not status["ok"]:
@@ -88,22 +90,13 @@ with tab_new:
             pred = draft["pred"]
             prio = pred["priority"]
             with st.container(key="card-result"):
-                st.markdown(
-                    f"<div style='display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap'>"
-                    f"<div><div class='pg-muted'>Predicted priority</div>"
-                    f"<div style='font-family:Sora;font-size:1.9rem;font-weight:700;color:{ui.PRIORITY_COLORS[prio]}'>"
-                    f"{prio.capitalize()}</div></div>"
-                    f"<div style='text-align:right'><div class='pg-muted'>Model confidence</div>"
-                    f"<div style='font-family:Sora;font-size:1.6rem;font-weight:600'>{pred['confidence']:.0%}</div></div></div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(ui.prob_meter(pred["probabilities"], prio), unsafe_allow_html=True)
+                st.markdown(ui.verdict(prio, pred["confidence"], pred.get("top_terms")), unsafe_allow_html=True)
+                st.markdown("<div style='height:.5rem'></div>" + ui.label("How sure the model is about each priority")
+                            + ui.prob_meter(pred["probabilities"], prio), unsafe_allow_html=True)
                 bits = [f"Urgency score {pred['score']:.2f} ({pred['bucket']})"]
                 if pred.get("type"):
                     bits.append(f"Type: {pred['type']} ({pred['type_confidence']:.0%})")
                 st.markdown(" ".join(ui.soft_badge(b) for b in bits), unsafe_allow_html=True)
-                if pred["top_terms"]:
-                    st.markdown("**Words that drove the score** " + " ".join(f":gray-badge[{t}]" for t in pred["top_terms"]))
                 st.caption(f"Model: {pred['model_name']}. Confidence is the share of the forest's trees "
                            "voting for this class.")
 
@@ -152,6 +145,16 @@ with tab_new:
             if pred.get("similar"):
                 with st.container(key="card-similar"):
                     st.markdown("##### Similar resolved tickets")
+                    top = max(pred["similar"], key=lambda h: h["similarity"])
+                    st.markdown(ui.ladder([{"label": f"#{h['ticket_id']}",
+                                            "sub": (h.get("priority") or "archive").capitalize(), "sim": h["similarity"]}
+                                           for h in pred["similar"]], SIM_THRESHOLD), unsafe_allow_html=True)
+                    if top["similarity"] >= SIM_THRESHOLD and (top.get("answer") or "").strip():
+                        st.success(f"At least {SIM_THRESHOLD:.0%} similar: when saved, this ticket's solution is "
+                                   "recommended to the requester, who closes it or escalates.", icon=":material/lightbulb:")
+                    else:
+                        st.warning(f"Below {SIM_THRESHOLD:.0%} similar: when saved, the ticket goes straight to the "
+                                   "escalation queue.", icon=":material/assignment_late:")
                     for s in pred["similar"]:
                         prio_html = ui.priority_badge(s.get("priority"), prefix="Archive: ") if s.get("priority") else ""
                         st.markdown(f"**#{s['ticket_id']}** {prio_html} <span class='pg-muted'>similarity "
@@ -192,11 +195,15 @@ with tab_hist:
     else:
         df = pd.DataFrame([{
             "id": r["id"], "subject": r["subject"], "priority": r["priority"].capitalize() if r["priority"] else "",
-            "model": (r["predicted_priority"] or "").capitalize(), "confidence": round(100 * (r["confidence"] or 0)),
-            "corrected": "Yes" if r["corrected"] else "", "stage": r["stage_label"],
+            "model": (r["predicted_priority"] or "").capitalize() + (" ✎" if r["corrected"] else ""),
+            "confidence": round(100 * (r["confidence"] or 0)), "stage": r["stage_label"],
             "requester": r.get("requester_name") or r.get("requester") or "",
             "assignee": r.get("assignee_name") or "", "source": r["source"], "created": ui.local_time(r["created_at"]),
         } for r in rows])
+        if not arch:
+            df = df.drop(columns=["source"])
+        mix = {p: sum(1 for r in rows if r["priority"] == p) for p in ui.PRIORITY_ORDER}
+        st.markdown(ui.ribbon(mix, of="shown"), unsafe_allow_html=True)
         ids = df["id"].tolist()
         default_rows = [ids.index(focus)] if focus in ids else []
         event = st.dataframe(
@@ -204,18 +211,18 @@ with tab_hist:
             on_select="rerun", selection_mode="single-row", key="hist_table",
             selection_default={"selection": {"rows": default_rows}} if default_rows else None,
             column_config={
-                "id": st.column_config.NumberColumn("#", format="%d", width="small"),
-                "subject": st.column_config.TextColumn("Subject", width="large"),
-                "priority": st.column_config.TextColumn("Priority", width="small"),
-                "model": st.column_config.TextColumn("Model said", width="small"),
+                "id": st.column_config.NumberColumn("#", format="%d", width=52),
+                "subject": st.column_config.TextColumn("Subject", width=250),
+                "priority": st.column_config.TextColumn("Priority", width=78),
+                "model": st.column_config.TextColumn("Model said", width=92,
+                                                     help="The model's prediction; ✎ means a Senior Analyst changed it"),
                 "confidence": st.column_config.ProgressColumn("Confidence", min_value=0, max_value=100,
-                                                              format="%d%%"),
-                "corrected": st.column_config.TextColumn("Corrected", width="small"),
-                "stage": st.column_config.TextColumn("Stage", width="small"),
-                "requester": st.column_config.TextColumn("Raised by", width="small"),
-                "assignee": st.column_config.TextColumn("Assigned to", width="small"),
-                "source": st.column_config.TextColumn("Source", width="small"),
-                "created": st.column_config.TextColumn("Created"),
+                                                              format="%d%%", width=110),
+                "stage": st.column_config.TextColumn("Stage", width=96),
+                "requester": st.column_config.TextColumn("Raised by", width=90),
+                "assignee": st.column_config.TextColumn("Assigned to", width=96),
+                "source": st.column_config.TextColumn("Source", width=74),
+                "created": st.column_config.TextColumn("Created", width=104),
             },
         )
         sel = event.selection.rows if event and event.selection else []

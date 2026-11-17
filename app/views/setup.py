@@ -20,12 +20,11 @@ import auth_ui  # noqa: E402
 from copilot.auth import AuthError, create_account, needs_setup  # noqa: E402
 
 P = st.session_state["_pages"]
-auth_ui.theme()
+auth_ui.theme(ambient=True, role="analyst")
 auth_ui.brand_bar("Back to role selection", "login", key="setup-back")
 
 _, mid, _ = st.columns([1, 1.7, 1])
 with mid:
-    st.write("")
     with st.container(key="auth-card"):
         st.markdown('<div class="pg-form-head" style="--card-accent:#8B5CF6"><div class="ic">'
                     f'{auth_ui.icon("admin_panel_settings")}</div><h1>Set up PRAGYAAN</h1>'

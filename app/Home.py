@@ -50,9 +50,9 @@ from copilot.db import ensure_db  # noqa: E402
 
 st.set_page_config(
     page_title="PRAGYAAN",
-    page_icon=str(APP / "static" / "pragyaan-mark.svg"),
+    page_icon=str(APP / "static" / "favicon.png"),
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 ensure_db()
 seed_default_rules()
@@ -101,7 +101,7 @@ def page(path: str, title: str, icon: str, url: str, **kw) -> st.Page:
 
 # ---------------------------------------------------------------- signed out
 if not user:
-    ui.inject_css()
+    ui.inject_css(calm=False)
     # no sidebar while signed out (it can linger after signing out in the same tab)
     st.markdown('<style>section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], '
                 '[data-testid="stExpandSidebarButton"] { display: none !important; }</style>', unsafe_allow_html=True)
@@ -124,7 +124,7 @@ if not user:
     st.stop()
 
 # ---------------------------------------------------------------- signed in
-ui.inject_css()
+ui.inject_css(calm=True)
 if st.session_state.pop("_clear_cookie", False):
     auth_ui.clear_session_cookie()
 cookie = st.session_state.pop("_set_cookie", None)
@@ -179,8 +179,8 @@ else:  # analyst
     }
 st.session_state["_pages"] = P
 
-st.logo(str(APP / "static" / "pragyaan-logo.svg"), size="large",
-        icon_image=str(APP / "static" / "pragyaan-mark.svg"))
+st.logo(str(APP / "static" / "pragyaan-logo-full-dark.png"), size="large",
+        icon_image=str(APP / "static" / "pragyaan-mark.png"))
 nav = st.navigation(sections, position="sidebar")
 if st.session_state.pop("_go_home", False) and not user["must_change_password"]:
     st.switch_page(P["home" if role == "employee" else "dashboard"])
@@ -203,6 +203,8 @@ with st.container(key="topbar"):
                     else "Search tickets, documents, tasks and the archive…")
             st.text_input("Search", key="global_q", placeholder=hint, label_visibility="collapsed",
                           on_change=_submit_search, icon=":material/search:")
+    with c_space, st.container(horizontal=True, horizontal_alignment="right"):
+        ui.theme_switch()
     with c_bell:
         n_unread = unread_count(user["login_id"], role)
         with st.popover(f"{n_unread}" if n_unread else "", icon=":material/notifications:",
@@ -238,6 +240,22 @@ with st.container(key="topbar"):
                 _sign_out()
                 st.rerun()
 
+# Floating dock: the role's most-used pages, one tap away on every screen (and on phones,
+# where the sidebar is folded away).
+DOCK = {
+    "employee": [("home", "Home", "home"), ("submit", "New ticket", "add_circle"), ("my_tickets", "My tickets", "confirmation_number"),
+                 ("assistant", "Assistant", "forum"), ("knowledge", "Knowledge", "library_books")],
+    "analyst": [("dashboard", "Overview", "space_dashboard"), ("review", "Escalations", "assignment_late"),
+                ("triage", "Tickets", "confirmation_number"), ("team", "Team", "groups"), ("analytics", "Analytics", "insights")],
+}
+if not user["must_change_password"]:
+    current = next((k for k, pg in P.items() if pg.title == nav.title), None)
+    with st.container(key="dock", horizontal=True, gap="small", wrap=False, width="content"):
+        for name, label, ico in DOCK[role]:
+            if name in P and st.button(label, key=f"dock-{name}", icon=f":material/{ico}:",
+                                       type="primary" if current == name else "secondary"):
+                st.switch_page(P[name])
+
 if st.session_state.pop("_go_search", False) and "search" in P:
     st.switch_page(P["search"])
 
@@ -251,21 +269,16 @@ with st.sidebar:
     if "_kb_count" not in st.session_state:
         st.session_state["_kb_count"] = archive_available()
     kb_n = st.session_state["_kb_count"]
-    accent = "#A78BFA" if role == "analyst" else "#22D3EE"
+    def _dot(on: bool) -> str:
+        return '<i></i>' if on else '<i class="off"></i>'
+
     st.markdown(
-        f"""<div style="margin-top:1.2rem;padding:.75rem .85rem;border:1px solid #26315C;border-radius:12px;
-        background:rgba(255,255,255,.03);font-size:.8rem;line-height:1.5;color:#AEB5D6">
-        <div style="color:{accent};font-weight:600;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase">
-        {ui.esc(user['role_label'])} workspace</div>
-        <div style="color:#fff;font-weight:600;margin-top:.15rem">{ui.esc(user['name'])}</div>
-        <div>{ui.esc(user['login_id'])}</div></div>
-        <div style="margin-top:.6rem;padding:.8rem .85rem;border:1px solid #26315C;border-radius:12px;
-        background:rgba(255,255,255,.03);font-size:.8rem;line-height:1.55;color:#AEB5D6">
-        <div style="color:#fff;font-weight:600;margin-bottom:.25rem">System status</div>
-        <div>{'&#9679;' if ms['ok'] else '&#9675;'} Priority model: {ui.esc('ready' if ms['ok'] else 'missing')}</div>
-        <div>{'&#9679;' if kb_n else '&#9675;'} Solution archive: {f"{kb_n:,} tickets" if kb_n else 'not indexed'}</div>
-        <div>{'&#9679;' if llm else '&#9675;'} Language model: {ui.esc(llm or 'not connected')}</div>
-        </div>""",
+        f"""<div class="pg-side"><div class="who">{ui.esc(user['role_label'])} workspace<b>{ui.esc(user['name'])}</b>
+        {ui.esc(user['login_id'])}</div>
+        <div class="sys"><b>System status</b>
+        <div>{_dot(ms['ok'])}Priority model: {ui.esc('ready' if ms['ok'] else 'missing')}</div>
+        <div>{_dot(bool(kb_n))}Solution archive: {f"{kb_n:,} tickets" if kb_n else 'not indexed'}</div>
+        <div>{_dot(bool(llm))}Language model: {ui.esc(llm or 'not connected')}</div></div></div>""",
         unsafe_allow_html=True,
     )
 

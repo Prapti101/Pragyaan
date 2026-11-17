@@ -40,7 +40,6 @@ with k3:
 with k4:
     ui.kpi("Unassigned escalations", f"{qc['escalated']}", "Ready to assign", icon_name="assignment_ind",
            tone=ui.STAGE_COLORS["escalated"] if qc["escalated"] else None)
-st.write("")
 
 # One-time display of a temporary password just issued
 issued = st.session_state.get("_team_issued")
@@ -109,8 +108,13 @@ if tab == "people":
             else:
                 st.session_state["_toast"] = f"Saved {name}."
                 st.rerun()
+        st.divider()
         if not is_me:
-            if st.button("Issue a temporary password", icon=":material/key:", key=f"reset-{a['id']}"):
+            p1, p2 = st.columns([3, 1.25], vertical_alignment="center")
+            p1.markdown(ui.label("Password") + "<div class='pg-muted'>Locked out or forgot it? Issue a one-time "
+                        f"temporary password; {ui.esc(a['name'].split(' ')[0])} chooses a new one at the next sign-in."
+                        "</div>", unsafe_allow_html=True)
+            if p2.button("Issue a temporary password", icon=":material/key:", key=f"reset-{a['id']}", width="stretch"):
                 temp = reset_password(a["id"], user)
                 st.session_state["_team_issued"] = {"what": "Temporary password issued", "name": a["name"],
                                                     "login_id": a["login_id"], "role": a["role"], "password": temp}

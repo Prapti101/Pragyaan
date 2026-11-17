@@ -215,7 +215,7 @@ def test_assistant_answers_from_documents_and_summarizes():
 
     add_document("vpn_policy.txt", VPN_DOC.encode(), collection="IT")
     out = answer("How do I reset my VPN password?", user_email="agent@example.com")
-    assert out["kind"] == "documents"
+    assert out["kind"] == "ai" and "VPN" in out["text"]
     assert out["doc_sources"][0]["title"].lower().startswith("vpn")
     assert db.fetchone("SELECT COUNT(*) AS n FROM escalations")["n"] == 0  # answered, not escalated
     summ = answer("summarize vpn policy", user_email="agent@example.com")
@@ -347,3 +347,121 @@ def test_employee_ticket_workflow_self_service_and_escalation(monkeypatch):
     assert get_ticket_for(t1["id"], emp)["stage"] == "escalated"
     c = my_ticket_counts(emp["id"])
     assert c["total"] == 4 and c["self_resolved"] == 1 and c["active"] == 2
+
+
+def test_explainability_layer_and_small_talk(monkeypatch):
+    """Greetings get a reply (no escalation), one-word questions ask for detail, and every answer or
+    escalation carries an explanation built from the real scores; a language model only rewords it."""
+    from copilot import explain
+    from copilot.assistant import answer
+    from copilot.db import fetchall
+
+    assert explain.is_small_talk("hello gemini") and explain.is_small_talk("Thanks!")
+    assert not explain.is_small_talk("hello, my VPN keeps disconnecting")
+    assert explain.is_too_vague("printer") and not explain.is_too_vague("VPN disconnects every few minutes")
+
+    ex = explain.explain_match("VPN disconnects every few minutes at home", "VPN connection drops repeatedly",
+                               "Update the VPN client and switch to the TCP profile.", 0.68,
+                               source="resolved ticket #12", use_llm=False)
+    assert ex["pct"] == 68 and ex["threshold_pct"] == 55 and ex["level"] == "Close match"
+    assert "vpn" in ex["shared"] and "68%" in ex["summary"] and ex["text"] is None
+
+    # with a language model configured, its wording is used; the numbers stay the system's
+    monkeypatch.setattr(explain, "provider_name", lambda: "Groq (test)")
+    # a failed model call is reported (not cached), and the next call tries the model again
+    monkeypatch.setattr(explain, "complete", lambda prompt: None)
+    monkeypatch.setattr(explain, "last_error", lambda: "rate limit reached, try again in a minute")
+    ex_fail = explain.explain_match("VPN disconnects every few minutes at home", "VPN connection drops repeatedly",
+                                    "Update the VPN client.", 0.68, source="resolved ticket #12")
+    assert ex_fail["text"] is None and ex_fail["llm_error"].startswith("rate limit")
+    monkeypatch.setattr(explain, "complete", lambda prompt: "Both describe VPN drops.\nCheck: same client version?")
+    ex2 = explain.explain_match("VPN disconnects every few minutes at home", "VPN connection drops repeatedly",
+                                "Update the VPN client.", 0.68, source="resolved ticket #12")
+    assert ex2["pct"] == 68 and ex2["method"] == "Groq (test)" and ex2["text"].startswith("Both describe")
+    monkeypatch.setattr(explain, "provider_name", lambda: None)
+
+    esc = explain.explain_escalation("Critical: payroll run failed, salaries not credited, urgent", 0.31,
+                                     {"label": "high", "score": 0.8, "top_terms": ["urgent", "payroll"]}, use_llm=False)
+    assert esc["pct"] == 31 and esc["label"] == "high" and "55%" in esc["summary"] and "“urgent”" in esc["summary"]
+
+    before = len(fetchall("SELECT id FROM escalations"))
+    hi = answer("hello gemini", user_email="emp@example.com")
+    assert hi["kind"] == "ai" and "PRAGYAAN" in hi["text"]
+    vague = answer("printer", user_email="emp@example.com")
+    assert vague["kind"] == "ai" and vague["text"]
+    assert len(fetchall("SELECT id FROM escalations")) == before  # neither created an escalation
+
+
+def test_escalating_an_answer_that_did_not_help(monkeypatch):
+    """After an answer the employee can mark it solved or escalate it; the Senior Analyst sees the answer
+    they got and their note, and the senior's reply comes back into their chat with a notification."""
+    from copilot import escalation
+    from copilot.activity import list_notifications
+    from copilot.assistant import answer, escalate_answer, history, mark_answer_resolved
+    from copilot.knowledge import add_document
+
+    monkeypatch.setattr(escalation, "upsert", lambda **kw: 999)  # don't write to the shared ticket archive
+    add_document("vpn_policy.txt", VPN_DOC.encode(), collection="IT")
+    out = answer("How do I reset my VPN password?", user_email="EMP-7")
+    assert out["kind"] == "ai" and out["question"] == "How do I reset my VPN password?"
+    msg_id = history("EMP-7")[-1]["id"]
+
+    with pytest.raises(ValueError):
+        escalate_answer(msg_id, "EMP-8", "not mine")  # nobody can act on another person's chat
+    esc_id = escalate_answer(msg_id, "EMP-7", "I followed the steps but the reset link never arrives")
+    assert escalate_answer(msg_id, "EMP-7") == esc_id  # escalating twice doesn't duplicate it
+    esc = escalation.get_escalation(esc_id)
+    assert esc["source"] == "not_resolved" and esc["requester"] == "EMP-7"
+    assert esc["question"] == "How do I reset my VPN password?" and "reset link" in esc["employee_note"]
+    assert esc["attempted_answer"] and history("EMP-7")[-1]["meta"]["escalated_id"] == esc_id
+
+    escalation.resolve_escalation(esc_id, "Your account was locked; it is unlocked now. Request the link again.",
+                                  resolved_by="SA-001")
+    last = history("EMP-7")[-1]
+    assert last["meta"]["kind"] == "senior_answer" and "unlocked" in last["content"]
+    assert any("answered your question" in n["message"] for n in list_notifications("EMP-7", role="employee"))
+
+    out2 = answer("How do I reset my VPN password?", user_email="EMP-9")
+    mark_answer_resolved(history("EMP-9")[-1]["id"], "EMP-9")
+    assert history("EMP-9")[-1]["meta"]["feedback"] == "resolved"
+
+
+def test_chat_assistant_uses_the_conversation_and_find_a_fix_escalates(monkeypatch):
+    """The assistant is a normal chat: the model gets the conversation and company context, nothing is escalated
+    from the chat. Escalation with its explanation happens from Find a fix."""
+    from copilot import assistant, escalation, llm
+    from copilot.assistant import answer, escalate_question, history, rate_answer
+
+    seen = []
+
+    def fake_stream(messages, **kw):
+        seen.append(messages)
+        yield "Sure, "
+        yield "here's how."
+
+    monkeypatch.setattr(llm, "provider_name", lambda: "Groq (test)")
+    monkeypatch.setattr(llm, "chat_stream", fake_stream)
+    monkeypatch.setattr(llm, "last_model", lambda: "Groq (test)")
+    monkeypatch.setattr(llm, "last_error", lambda: None)
+    before = len(db.fetchall("SELECT id FROM escalations"))
+    first = answer("What is the cafeteria lunch menu on Friday?", user_email="EMP-20")
+    second = answer("and on Monday?", user_email="EMP-20")
+    assert first["text"] == second["text"] == "Sure, here's how." and second["method"] == "Groq (test)"
+    roles = [m["role"] for m in seen[1]]
+    assert roles[0] == "system" and roles[-3:] == ["user", "assistant", "user"]  # the earlier turn is included
+    assert len(db.fetchall("SELECT id FROM escalations")) == before  # the chat never escalates
+    assert "only help with work at this company" in seen[0][0]["content"]  # a company assistant, not a general AI
+
+    # "Explain this step by step" from Find a fix: the fix is given to the model, and no Find a fix hint comes back
+    fx = answer("Explain this fix step by step for my problem: VPN drops", user_email="EMP-20",
+                focus={"source": "the fix from solved ticket #42", "text": "Update the VPN client to 5.2."})
+    assert "Update the VPN client to 5.2." in seen[-1][0]["content"]
+    assert fx["focus_source"] == "the fix from solved ticket #42" and fx["find_fix"] is False
+
+    rate_answer(history("EMP-20")[-1]["id"], "EMP-20", "up")
+    assert history("EMP-20")[-1]["meta"]["thumbs"] == "up"
+
+    out = escalate_question("What is the cafeteria lunch menu on Friday?", "EMP-20", best_similarity=0.28)
+    esc = escalation.get_escalation(out["escalation_id"])
+    assert esc["requester"] == "EMP-20" and esc["source"] == "unanswered"
+    assert out["explain"]["pct"] == 28 and out["explain"]["threshold_pct"] == 55
